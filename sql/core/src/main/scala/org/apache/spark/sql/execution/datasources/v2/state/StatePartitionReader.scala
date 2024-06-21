@@ -20,10 +20,13 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{GenericInternalRow, UnsafeRow}
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
+import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions.StateDataSourceModeType
 import org.apache.spark.sql.execution.datasources.v2.state.metadata.StateMetadataPartitionReader
 import org.apache.spark.sql.execution.datasources.v2.state.utils.SchemaUtil
-import org.apache.spark.sql.execution.streaming.state.{NoPrefixKeyStateEncoderSpec, PrefixKeyScanStateEncoderSpec, ReadStateStore, StateStoreConf, StateStoreId, StateStoreProvider, StateStoreProviderId}
+import org.apache.spark.sql.execution.streaming.state.{NoPrefixKeyStateEncoderSpec, PrefixKeyScanStateEncoderSpec, ReadStateStore, StateStoreCDCReader, StateStoreConf, StateStoreId, StateStoreProvider, StateStoreProviderId}
+import org.apache.spark.sql.execution.streaming.state.RecordType.{getRecordTypeAsString, RecordType}
 import org.apache.spark.sql.types.StructType
+import org.apache.spark.unsafe.types.UTF8String
 import org.apache.spark.util.SerializableConfiguration
 
 /**
@@ -101,8 +104,19 @@ class StatePartitionReader(
     }
   }
 
+  private lazy val cdcReader: StateStoreCDCReader = {
+    provider.getStateStoreCDCReader(
+      partition.sourceOptions.cdcStartBatchID.get,
+      partition.sourceOptions.cdcEndBatchId.get)
+  }
+
   private lazy val iter: Iterator[InternalRow] = {
-    store.iterator().map(pair => unifyStateRowPair((pair.key, pair.value)))
+    if (partition.sourceOptions.modeType == StateDataSourceModeType.CDC) {
+      println("Here!!!!!!")
+      cdcReader.iterator.map(unifyStateCDCRow)
+    } else {
+      store.iterator().map(pair => unifyStateRowPair((pair.key, pair.value)))
+    }
   }
 
   private var current: InternalRow = _
@@ -122,6 +136,7 @@ class StatePartitionReader(
   override def close(): Unit = {
     current = null
     store.abort()
+    cdcReader.close()
     provider.close()
   }
 
@@ -131,5 +146,15 @@ class StatePartitionReader(
     row.update(1, pair._2)
     row.update(2, partition.partition)
     row
+  }
+
+  private def unifyStateCDCRow(row: (RecordType, UnsafeRow, UnsafeRow, Long)): InternalRow = {
+    val result = new GenericInternalRow(5)
+    result.update(0, row._2)
+    result.update(1, row._3)
+    result.update(2, UTF8String.fromString(getRecordTypeAsString(row._1)))
+    result.update(3, row._4)
+    result.update(4, partition.partition)
+    result
   }
 }

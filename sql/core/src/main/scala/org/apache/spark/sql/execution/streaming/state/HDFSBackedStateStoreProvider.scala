@@ -338,6 +338,12 @@ private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with 
     }
   }
 
+  override def getStateStoreCDCReader(startVersion: Long, endVersion: Long): StateStoreCDCReader = {
+    new HDFSBackedStateStoreCDCReader(fm, baseDir, startVersion, endVersion,
+      CompressionCodec.createCodec(sparkConf, storeConf.compressionCodec),
+      keySchema, valueSchema)
+  }
+
   // Run bunch of validations specific to HDFSBackedStateStoreProvider
   private def runValidation(
       useColumnFamilies: Boolean,

@@ -28,14 +28,15 @@ import org.apache.spark.sql.{RuntimeConfig, SparkSession}
 import org.apache.spark.sql.catalyst.DataSourceOptions
 import org.apache.spark.sql.connector.catalog.{Table, TableProvider}
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions.JoinSideValues
+import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions.{JoinSideValues, StateDataSourceModeType}
 import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions.JoinSideValues.JoinSideValues
+import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions.StateDataSourceModeType.ModeType
 import org.apache.spark.sql.execution.streaming.{CommitLog, OffsetSeqLog, OffsetSeqMetadata}
 import org.apache.spark.sql.execution.streaming.StreamingCheckpointConstants.{DIR_NAME_COMMITS, DIR_NAME_OFFSETS, DIR_NAME_STATE}
 import org.apache.spark.sql.execution.streaming.StreamingSymmetricHashJoinHelper.{LeftSide, RightSide}
 import org.apache.spark.sql.execution.streaming.state.{StateSchemaCompatibilityChecker, StateStore, StateStoreConf, StateStoreId, StateStoreProviderId}
 import org.apache.spark.sql.sources.DataSourceRegister
-import org.apache.spark.sql.types.{IntegerType, StructType}
+import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 /**
@@ -80,10 +81,21 @@ class StateDataSource extends TableProvider with DataSourceRegister {
           manager.readSchemaFile()
       }
 
-      new StructType()
-        .add("key", keySchema)
-        .add("value", valueSchema)
-        .add("partition_id", IntegerType)
+      if (sourceOptions.modeType == StateDataSourceModeType.CDC) {
+        new StructType()
+          .add("key", keySchema)
+          .add("value", valueSchema)
+          .add("operation_type", StringType)
+          .add("batch_id", LongType)
+          .add("partition_id", IntegerType)
+      } else {
+        new StructType()
+          .add("key", keySchema)
+          .add("value", valueSchema)
+          .add("partition_id", IntegerType)
+      }
+
+
     } catch {
       case NonFatal(e) =>
         throw StateDataSourceErrors.failedToReadStateSchema(sourceOptions, e)
@@ -118,7 +130,10 @@ case class StateSourceOptions(
     storeName: String,
     joinSide: JoinSideValues,
     snapshotStartBatchId: Option[Long],
-    snapshotPartitionId: Option[Int]) {
+  snapshotPartitionId: Option[Int],
+  modeType: ModeType,
+  cdcStartBatchID: Option[Long],
+  cdcEndBatchId: Option[Long]) {
   def stateCheckpointLocation: Path = new Path(resolvedCpLocation, DIR_NAME_STATE)
 
   override def toString: String = {
@@ -137,10 +152,29 @@ object StateSourceOptions extends DataSourceOptions {
   val JOIN_SIDE = newOption("joinSide")
   val SNAPSHOT_START_BATCH_ID = newOption("snapshotStartBatchId")
   val SNAPSHOT_PARTITION_ID = newOption("snapshotPartitionId")
+  val MODE_TYPE = newOption("modeType")
+  val CDC_START_BATCH_ID = newOption("cdcStartBatchId")
+  val CDC_END_BATCH_ID = newOption("cdcEndBatchId")
 
   object JoinSideValues extends Enumeration {
     type JoinSideValues = Value
     val left, right, none = Value
+  }
+
+  object StateDataSourceModeType extends Enumeration {
+    type ModeType = Value
+
+    val NORMAL = Value("normal")
+    val CDC = Value("cdc")
+
+    // Generate record type from byte representation
+    def getModeTypeFromString(mode: String): ModeType = {
+      mode match {
+        case "normal" => NORMAL
+        case "cdc" => CDC
+        case _ => throw new RuntimeException(s"Found invalid mode type for value=$mode")
+      }
+    }
   }
 
   def apply(
@@ -217,9 +251,16 @@ object StateSourceOptions extends DataSourceOptions {
       throw StateDataSourceErrors.requiredOptionUnspecified(SNAPSHOT_PARTITION_ID)
     }
 
+    val modeType = Option(options.get(MODE_TYPE)).map(
+      StateDataSourceModeType.getModeTypeFromString).getOrElse(StateDataSourceModeType.NORMAL)
+    val cdcStartBatchId = Option(options.get(CDC_START_BATCH_ID)).map(_.toLong)
+    val cdcEndBatchId = Option(options.get(CDC_END_BATCH_ID)).map(_.toLong)
+
+
     StateSourceOptions(
       resolvedCpLocation, batchId, operatorId, storeName,
-      joinSide, snapshotStartBatchId, snapshotPartitionId)
+      joinSide, snapshotStartBatchId, snapshotPartitionId,
+      modeType, cdcStartBatchId, cdcEndBatchId)
   }
 
   private def resolvedCheckpointLocation(

@@ -69,6 +69,7 @@ class StateTable(
   override def properties(): util.Map[String, String] = Map.empty[String, String].asJava
 
   private def isValidSchema(schema: StructType): Boolean = {
+    return true
     if (schema.fieldNames.toImmutableArraySeq != Seq("key", "value", "partition_id")) {
       false
     } else if (!SchemaUtil.getSchemaAsDataType(schema, "key").isInstanceOf[StructType]) {

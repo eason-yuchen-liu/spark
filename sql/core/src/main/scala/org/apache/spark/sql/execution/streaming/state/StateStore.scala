@@ -398,6 +398,11 @@ trait StateStoreProvider {
     throw new SparkUnsupportedOperationException("getReadStore with startVersion and endVersion " +
       s"is not supported by ${this.getClass.toString}")
 
+  def getStateStoreCDCReader(startVersion: Long, endVersion: Long): StateStoreCDCReader = {
+    throw new SparkUnsupportedOperationException("getStateStoreCDCReader is not supported by " +
+      this.getClass.toString)
+  }
+
   /** Optional method for providers to allow for background maintenance (e.g. compactions) */
   def doMaintenance(): Unit = { }
 

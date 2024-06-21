@@ -55,6 +55,14 @@ object RecordType extends Enumeration {
     }
   }
 
+  def getRecordTypeAsString(recordType: RecordType): String = {
+    recordType match {
+      case PUT_RECORD => "PUT"
+      case DELETE_RECORD => "DELETE"
+      case _ => "UNDEFINED"
+    }
+  }
+
   // Generate record type from byte representation
   def getRecordTypeFromByte(byte: Byte): RecordType = {
     byte match {

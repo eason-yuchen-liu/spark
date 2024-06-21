@@ -66,21 +66,6 @@ abstract class StateStoreCDCReader(
     }
   }
 
-
-//   private def decompressStream(inputStream: DataInputStream): DataInputStream = {
-//     val compressed = compressionCodec.compressedInputStream(inputStream)
-//     new DataInputStream(compressed)
-//   }
-
-//   private val sourceStream = try {
-//     fm.open(fileToRead)
-//   } catch {
-//     case f: FileNotFoundException =>
-//       throw QueryExecutionErrors.failedToReadStreamingStateFileError(fileToRead, f)
-//   }
-//   protected val input: DataInputStream = decompressStream(sourceStream)
-
-
   protected lazy val fileIterator =
     new ChangeLogFileIterator(stateLocation, startVersion, endVersion)
 
@@ -92,7 +77,6 @@ abstract class StateStoreCDCReader(
   override def getNext(): (RecordType.Value, UnsafeRow, UnsafeRow, Long)
 
   def close(): Unit
-  // = { if (input != null) input.close() }
 }
 
 class HDFSBackedStateStoreCDCReader(
@@ -112,29 +96,32 @@ class HDFSBackedStateStoreCDCReader(
 
   override def getNext(): (RecordType.Value, UnsafeRow, UnsafeRow, Long) = {
     while (currentChangelogReader == null || !currentChangelogReader.hasNext) {
+      if (currentChangelogReader != null) {
+        currentChangelogReader.close()
+      }
       if (!fileIterator.hasNext) {
         finished = true
-        print("return 1\n")
         return null
       }
       currentChangelogReader =
         new StateStoreChangelogReaderV1(fm, fileIterator.next(), compressionCodec)
     }
 
-    print("return 2\n")
     val readResult = currentChangelogReader.next()
     val keyRow = new UnsafeRow(keySchema.fields.length)
     keyRow.pointTo(readResult._2, readResult._2.length)
     val valueRow = new UnsafeRow(valueSchema.fields.length)
-    valueRow.pointTo(readResult._3, readResult._3.length)
+    // If valueSize in existing file is not multiple of 8, floor it to multiple of 8.
+    // This is a workaround for the following:
+    // Prior to Spark 2.3 mistakenly append 4 bytes to the value row in
+    // `RowBasedKeyValueBatch`, which gets persisted into the checkpoint data
+    valueRow.pointTo(readResult._3, (readResult._3.length / 8) * 8)
     (readResult._1, keyRow, valueRow, fileIterator.getVersion - 1)
   }
 
-//  fix the problem when change if -> while will return null
-
-
-
   override def close(): Unit = {
-
+    if (currentChangelogReader != null) {
+      currentChangelogReader.close()
+    }
   }
 }

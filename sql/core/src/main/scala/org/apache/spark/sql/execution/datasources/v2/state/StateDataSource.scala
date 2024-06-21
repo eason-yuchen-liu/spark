@@ -253,8 +253,31 @@ object StateSourceOptions extends DataSourceOptions {
 
     val modeType = Option(options.get(MODE_TYPE)).map(
       StateDataSourceModeType.getModeTypeFromString).getOrElse(StateDataSourceModeType.NORMAL)
-    val cdcStartBatchId = Option(options.get(CDC_START_BATCH_ID)).map(_.toLong)
-    val cdcEndBatchId = Option(options.get(CDC_END_BATCH_ID)).map(_.toLong)
+
+    var cdcStartBatchId = Option(options.get(CDC_START_BATCH_ID)).map(_.toLong)
+    var cdcEndBatchId = Option(options.get(CDC_END_BATCH_ID)).map(_.toLong)
+
+    //    if (modeType == StateDataSourceModeType.NORMAL) {
+    //      if (cdcStartBatchId.isDefined) {
+    //        throw StateDataSourceErrors.conflictOptions(Seq(MODE_TYPE, CDC_START_BATCH_ID))
+    //      }
+    //      if (cdcEndBatchId.isDefined) {
+    //        throw StateDataSourceErrors.conflictOptions(Seq(MODE_TYPE, CDC_END_BATCH_ID))
+    //      }
+    //    } else {
+    //      cdcStartBatchId = Option(cdcStartBatchId.getOrElse(
+    //        getFirstCommittedBatch(sparkSession, resolvedCpLocation)))
+    //      cdcEndBatchId = Option(cdcEndBatchId.getOrElse(
+    //        getLastCommittedBatch(sparkSession, resolvedCpLocation)))
+    //
+    //      if (cdcStartBatchId.isDefined && cdcStartBatchId.get < 0) {
+    //        throw StateDataSourceErrors.invalidOptionValueIsNegative(CDC_START_BATCH_ID)
+    //      }
+    //      if (cdcEndBatchId.isDefined && (cdcEndBatchId.get < 0)) {
+    //        throw
+    //      }
+    //
+    //    }
 
 
     StateSourceOptions(
@@ -276,6 +299,15 @@ object StateSourceOptions extends DataSourceOptions {
       new Path(checkpointLocation, DIR_NAME_COMMITS).toString)
     commitLog.getLatest() match {
       case Some((lastId, _)) => lastId
+      case None => throw StateDataSourceErrors.committedBatchUnavailable(checkpointLocation)
+    }
+  }
+
+  private def getFirstCommittedBatch(session: SparkSession, checkpointLocation: String): Long = {
+    val commitLog = new CommitLog(session,
+      new Path(checkpointLocation, DIR_NAME_COMMITS).toString)
+    commitLog.getEarliestBatchId() match {
+      case Some(firstId) => firstId
       case None => throw StateDataSourceErrors.committedBatchUnavailable(checkpointLocation)
     }
   }

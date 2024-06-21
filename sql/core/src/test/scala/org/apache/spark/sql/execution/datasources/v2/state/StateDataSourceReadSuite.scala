@@ -398,20 +398,6 @@ class HDFSBackedStateDataSourceReadSuite extends StateDataSourceReadSuite {
   test("option snapshotPartitionId") {
     testSnapshotPartitionId()
   }
-
-  test("just test") {
-    val provider = getNewStateStoreProvider("/tmp/spark/state")
-      .asInstanceOf[HDFSBackedStateStoreProvider]
-    val reader = provider.getStateStoreCDCReader(1, 4)
-    println(reader.getNext()) // why is the first element null
-    println(reader.getNext())
-    println(reader.getNext())
-    println(reader.getNext())
-    println(reader.getNext())
-    println(reader.getNext())
-    println(reader.getNext())
-
-  }
 }
 
 class RocksDBStateDataSourceReadSuite extends StateDataSourceReadSuite {

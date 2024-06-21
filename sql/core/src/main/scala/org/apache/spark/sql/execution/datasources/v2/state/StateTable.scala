@@ -23,10 +23,10 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.catalog.{MetadataColumn, SupportsMetadataColumns, SupportsRead, Table, TableCapability}
 import org.apache.spark.sql.connector.read.ScanBuilder
-import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions.JoinSideValues
+import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions.{JoinSideValues, StateDataSourceModeType}
 import org.apache.spark.sql.execution.datasources.v2.state.utils.SchemaUtil
 import org.apache.spark.sql.execution.streaming.state.StateStoreConf
-import org.apache.spark.sql.types.{IntegerType, StructType}
+import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.util.ArrayImplicits._
 
@@ -74,12 +74,33 @@ class StateTable(
   override def properties(): util.Map[String, String] = Map.empty[String, String].asJava
 
   private def isValidSchema(schema: StructType): Boolean = {
-    return true
+    if (sourceOptions.modeType == StateDataSourceModeType.CDC) {
+      return isValidSchemaCDC(schema)
+    }
     if (schema.fieldNames.toImmutableArraySeq != Seq("key", "value", "partition_id")) {
       false
     } else if (!SchemaUtil.getSchemaAsDataType(schema, "key").isInstanceOf[StructType]) {
       false
     } else if (!SchemaUtil.getSchemaAsDataType(schema, "value").isInstanceOf[StructType]) {
+      false
+    } else if (!SchemaUtil.getSchemaAsDataType(schema, "partition_id").isInstanceOf[IntegerType]) {
+      false
+    } else {
+      true
+    }
+  }
+
+  private def isValidSchemaCDC(schema: StructType): Boolean = {
+    if (schema.fieldNames.toImmutableArraySeq !=
+      Seq("key", "value", "operation_type", "batch_id", "partition_id")) {
+      false
+    } else if (!SchemaUtil.getSchemaAsDataType(schema, "key").isInstanceOf[StructType]) {
+      false
+    } else if (!SchemaUtil.getSchemaAsDataType(schema, "value").isInstanceOf[StructType]) {
+      false
+    } else if (!SchemaUtil.getSchemaAsDataType(schema, "operation_type").isInstanceOf[StringType]) {
+      false
+    } else if (!SchemaUtil.getSchemaAsDataType(schema, "batch_id").isInstanceOf[LongType]) {
       false
     } else if (!SchemaUtil.getSchemaAsDataType(schema, "partition_id").isInstanceOf[IntegerType]) {
       false

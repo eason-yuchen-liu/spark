@@ -39,8 +39,15 @@ class StatePartitionReaderFactory(
     schema: StructType) extends PartitionReaderFactory {
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
-    new StatePartitionReader(storeConf, hadoopConf,
-      partition.asInstanceOf[StateStoreInputPartition], schema)
+    val stateStoreInputPartition = partition.asInstanceOf[StateStoreInputPartition]
+    if (stateStoreInputPartition.sourceOptions.modeType == StateDataSourceModeType.CDC) {
+      new StateCDCPartitionReader(storeConf, hadoopConf,
+        stateStoreInputPartition, schema)
+    } else {
+      new StatePartitionReader(storeConf, hadoopConf,
+        stateStoreInputPartition, schema)
+    }
+
   }
 }
 
@@ -57,7 +64,7 @@ class StatePartitionReader(
   private val keySchema = SchemaUtil.getSchemaAsDataType(schema, "key").asInstanceOf[StructType]
   private val valueSchema = SchemaUtil.getSchemaAsDataType(schema, "value").asInstanceOf[StructType]
 
-  private lazy val provider: StateStoreProvider = {
+  protected lazy val provider: StateStoreProvider = {
     val stateStoreId = StateStoreId(partition.sourceOptions.stateCheckpointLocation.toString,
       partition.sourceOptions.operatorId, partition.partition, partition.sourceOptions.storeName)
     val stateStoreProviderId = StateStoreProviderId(stateStoreId, partition.queryId)
@@ -104,22 +111,11 @@ class StatePartitionReader(
     }
   }
 
-  private lazy val cdcReader: StateStoreCDCReader = {
-    provider.getStateStoreCDCReader(
-      partition.sourceOptions.cdcStartBatchID.get,
-      partition.sourceOptions.cdcEndBatchId.get)
+  protected lazy val iter: Iterator[InternalRow] = {
+    store.iterator().map(pair => unifyStateRowPair((pair.key, pair.value)))
   }
 
-  private lazy val iter: Iterator[InternalRow] = {
-    if (partition.sourceOptions.modeType == StateDataSourceModeType.CDC) {
-      println("Here!!!!!!")
-      cdcReader.iterator.map(unifyStateCDCRow)
-    } else {
-      store.iterator().map(pair => unifyStateRowPair((pair.key, pair.value)))
-    }
-  }
-
-  private var current: InternalRow = _
+  protected var current: InternalRow = _
 
   override def next(): Boolean = {
     if (iter.hasNext) {
@@ -136,7 +132,6 @@ class StatePartitionReader(
   override def close(): Unit = {
     current = null
     store.abort()
-    cdcReader.close()
     provider.close()
   }
 
@@ -146,6 +141,29 @@ class StatePartitionReader(
     row.update(1, pair._2)
     row.update(2, partition.partition)
     row
+  }
+}
+
+class StateCDCPartitionReader(
+  storeConf: StateStoreConf,
+  hadoopConf: SerializableConfiguration,
+  partition: StateStoreInputPartition,
+  schema: StructType) extends StatePartitionReader(storeConf, hadoopConf, partition, schema) {
+
+  private lazy val cdcReader: StateStoreCDCReader = {
+    provider.getStateStoreCDCReader(
+      partition.sourceOptions.cdcStartBatchID.get + 1,
+      partition.sourceOptions.cdcEndBatchId.get + 1)
+  }
+
+  override protected lazy val iter: Iterator[InternalRow] = {
+    cdcReader.iterator.map(unifyStateCDCRow)
+  }
+
+  override def close(): Unit = {
+    current = null
+    cdcReader.close()
+    provider.close()
   }
 
   private def unifyStateCDCRow(row: (RecordType, UnsafeRow, UnsafeRow, Long)): InternalRow = {

@@ -53,6 +53,9 @@ abstract class StateStoreCDCReader(
 
     private var currentVersion = startVersion - 1
 
+    /**
+     * returns the version of the return of the latest [[next]] function call
+     */
     def getVersion: Long = currentVersion
 
     override def hasNext: Boolean = currentVersion < endVersion

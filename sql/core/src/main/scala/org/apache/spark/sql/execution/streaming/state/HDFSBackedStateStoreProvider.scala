@@ -301,6 +301,12 @@ private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with 
     new HDFSBackedReadStateStore(endVersion, newMap)
   }
 
+  override def getStateStoreCDCReader(startVersion: Long, endVersion: Long): StateStoreCDCReader = {
+    new HDFSBackedStateStoreCDCReader(fm, baseDir, startVersion, endVersion,
+      CompressionCodec.createCodec(sparkConf, storeConf.compressionCodec),
+      keySchema, valueSchema)
+  }
+
   private def getLoadedMapForStore(version: Long): HDFSBackedStateStoreMap = synchronized {
     try {
       if (version < 0) {
@@ -336,12 +342,6 @@ private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with 
     catch {
       case e: Throwable => throw QueryExecutionErrors.cannotLoadStore(e)
     }
-  }
-
-  override def getStateStoreCDCReader(startVersion: Long, endVersion: Long): StateStoreCDCReader = {
-    new HDFSBackedStateStoreCDCReader(fm, baseDir, startVersion, endVersion,
-      CompressionCodec.createCodec(sparkConf, storeConf.compressionCodec),
-      keySchema, valueSchema)
   }
 
   // Run bunch of validations specific to HDFSBackedStateStoreProvider

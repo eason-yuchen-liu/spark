@@ -26,8 +26,10 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.spark.{SparkConf, SparkEnv}
 import org.apache.spark.internal.{Logging, MDC}
 import org.apache.spark.internal.LogKeys._
+import org.apache.spark.io.CompressionCodec
 import org.apache.spark.sql.catalyst.expressions.UnsafeRow
 import org.apache.spark.sql.errors.QueryExecutionErrors
+import org.apache.spark.sql.execution.streaming.CheckpointFileManager
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.util.Utils
 
@@ -352,6 +354,19 @@ private[sql] class RocksDBStateStoreProvider
     catch {
       case e: Throwable => throw QueryExecutionErrors.cannotLoadStore(e)
     }
+  }
+
+  override def getStateStoreCDCReader(startVersion: Long, endVersion: Long): StateStoreCDCReader = {
+    val statePath = stateStoreId.storeCheckpointLocation()
+    val sparkConf = Option(SparkEnv.get).map(_.conf).getOrElse(new SparkConf)
+    new RocksDBStateStoreCDCReader(
+      CheckpointFileManager.create(statePath, hadoopConf),
+      statePath,
+      startVersion,
+      endVersion,
+      CompressionCodec.createCodec(sparkConf, storeConf.compressionCodec),
+      keySchema,
+      valueSchema)
   }
 
   override def doMaintenance(): Unit = {

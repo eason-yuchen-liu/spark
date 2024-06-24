@@ -34,13 +34,10 @@ import org.apache.spark.util.NextIterator
  */
 abstract class StateStoreCDCReader(
     fm: CheckpointFileManager,
-    // fileToRead: Path,
     stateLocation: Path,
     startVersion: Long,
     endVersion: Long,
-    compressionCodec: CompressionCodec,
-    keySchema: StructType,
-    valueSchema: StructType)
+  compressionCodec: CompressionCodec)
   extends NextIterator[(RecordType.Value, UnsafeRow, UnsafeRow, Long)] with Logging {
 
   class ChangeLogFileIterator(
@@ -89,7 +86,7 @@ class HDFSBackedStateStoreCDCReader(
     valueSchema: StructType
   )
   extends StateStoreCDCReader(
-    fm, stateLocation, startVersion, endVersion, compressionCodec, keySchema, valueSchema) {
+    fm, stateLocation, startVersion, endVersion, compressionCodec) {
   override protected var changelogSuffix: String = "delta"
 
   private var currentChangelogReader: StateStoreChangelogReader = null
@@ -98,6 +95,54 @@ class HDFSBackedStateStoreCDCReader(
     while (currentChangelogReader == null || !currentChangelogReader.hasNext) {
       if (currentChangelogReader != null) {
         currentChangelogReader.close()
+      }
+      if (!fileIterator.hasNext) {
+        finished = true
+        return null
+      }
+      currentChangelogReader =
+        new StateStoreChangelogReaderV1(fm, fileIterator.next(), compressionCodec)
+    }
+
+    val readResult = currentChangelogReader.next()
+    val keyRow = new UnsafeRow(keySchema.fields.length)
+    keyRow.pointTo(readResult._2, readResult._2.length)
+    val valueRow = new UnsafeRow(valueSchema.fields.length)
+    // If valueSize in existing file is not multiple of 8, floor it to multiple of 8.
+    // This is a workaround for the following:
+    // Prior to Spark 2.3 mistakenly append 4 bytes to the value row in
+    // `RowBasedKeyValueBatch`, which gets persisted into the checkpoint data
+    valueRow.pointTo(readResult._3, (readResult._3.length / 8) * 8)
+    (readResult._1, keyRow, valueRow, fileIterator.getVersion - 1)
+  }
+
+  override def close(): Unit = {
+    if (currentChangelogReader != null) {
+      currentChangelogReader.close()
+    }
+  }
+}
+
+class RocksDBStateStoreCDCReader(
+  fm: CheckpointFileManager,
+  stateLocation: Path,
+  startVersion: Long,
+  endVersion: Long,
+  compressionCodec: CompressionCodec,
+  keySchema: StructType,
+  valueSchema: StructType
+)
+  extends StateStoreCDCReader(
+    fm, stateLocation, startVersion, endVersion, compressionCodec) {
+  override protected var changelogSuffix: String = "changelog"
+
+  private var currentChangelogReader: StateStoreChangelogReader = null
+
+  override def getNext(): (RecordType.Value, UnsafeRow, UnsafeRow, Long) = {
+    while (currentChangelogReader == null || !currentChangelogReader.hasNext) {
+      if (currentChangelogReader != null) {
+        currentChangelogReader.close()
+        currentChangelogReader = null
       }
       if (!fileIterator.hasNext) {
         finished = true

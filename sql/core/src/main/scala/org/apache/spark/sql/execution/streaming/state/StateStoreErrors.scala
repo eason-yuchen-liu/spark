@@ -151,14 +151,19 @@ object StateStoreErrors {
   }
 
   def stateStoreSnapshotFileNotFound(fileToRead: String, clazz: String):
-  StateStoreSnapshotFileNotFound = {
+    StateStoreSnapshotFileNotFound = {
     new StateStoreSnapshotFileNotFound(fileToRead, clazz)
   }
 
   def stateStoreSnapshotPartitionNotFound(
-    snapshotPartitionId: Long, operatorId: Int, checkpointLocation: String):
-  StateStoreSnapshotPartitionNotFound = {
+      snapshotPartitionId: Long, operatorId: Int, checkpointLocation: String):
+    StateStoreSnapshotPartitionNotFound = {
     new StateStoreSnapshotPartitionNotFound(snapshotPartitionId, operatorId, checkpointLocation)
+  }
+
+  def stateStoreProviderDoesNotSupportFineGrainedReplay(inputClass: String):
+    StateStoreProviderDoesNotSupportFineGrainedReplay = {
+    new StateStoreProviderDoesNotSupportFineGrainedReplay(inputClass)
   }
 }
 
@@ -268,7 +273,7 @@ class StateStoreValueSchemaNotCompatible(
 
 class StateStoreSnapshotFileNotFound(fileToRead: String, clazz: String)
   extends SparkUnsupportedOperationException(
-    errorClass = "CANNOT_LOAD_STATE_STORE.CANNOT_READ_SNAPSHOT_FILE_NOT_EXISTS",
+    errorClass = "CANNOT_LOAD_STATE_STORE.CANNOT_READ_MISSING_SNAPSHOT_FILE",
     messageParameters = Map(
       "fileToRead" -> fileToRead,
       "clazz" -> clazz))
@@ -291,3 +296,8 @@ class StateStoreValueRowFormatValidationFailure(errorMsg: String)
   extends SparkRuntimeException(
     errorClass = "STATE_STORE_VALUE_ROW_FORMAT_VALIDATION_FAILURE",
     messageParameters = Map("errorMsg" -> errorMsg))
+
+class StateStoreProviderDoesNotSupportFineGrainedReplay(inputClass: String)
+ extends SparkUnsupportedOperationException(
+   errorClass = "STATE_STORE_PROVIDER_DOES_NOT_SUPPORT_FINE_GRAINED_STATE_REPLAY",
+   messageParameters = Map("inputClass" -> inputClass))

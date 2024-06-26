@@ -34,7 +34,8 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.util.Utils
 
 private[sql] class RocksDBStateStoreProvider
-  extends StateStoreProvider with Logging with Closeable {
+  extends StateStoreProvider with Logging with Closeable
+    with SupportsFineGrainedReplayFromSnapshot {
   import RocksDBStateStoreProvider._
 
   class RocksDBStateStore(lastVersion: Long) extends StateStore {
@@ -311,62 +312,17 @@ private[sql] class RocksDBStateStoreProvider
     }
   }
 
-  override def getStore(startVersion: Long, endVersion: Long): StateStore = {
-    try {
-      if (startVersion < 1) {
-        throw QueryExecutionErrors.unexpectedStateStoreVersion(startVersion)
-      }
-      if (endVersion < startVersion) {
-        throw QueryExecutionErrors.unexpectedStateStoreVersion(endVersion)
-      }
-      rocksDB.load(startVersion, endVersion, readOnly = false)
-      new RocksDBStateStore(endVersion)
-    }
-    catch {
-      case e: Throwable => throw QueryExecutionErrors.cannotLoadStore(e)
-    }
-  }
-
   override def getReadStore(version: Long): StateStore = {
     try {
       if (version < 0) {
         throw QueryExecutionErrors.unexpectedStateStoreVersion(version)
       }
-      rocksDB.load(version, readOnly = true)
+      rocksDB.load(version, true)
       new RocksDBStateStore(version)
     }
     catch {
       case e: Throwable => throw QueryExecutionErrors.cannotLoadStore(e)
     }
-  }
-
-  override def getReadStore(startVersion: Long, endVersion: Long): StateStore = {
-    try {
-      if (startVersion < 1) {
-        throw QueryExecutionErrors.unexpectedStateStoreVersion(startVersion)
-      }
-      if (endVersion < startVersion) {
-        throw QueryExecutionErrors.unexpectedStateStoreVersion(endVersion)
-      }
-      rocksDB.load(startVersion, endVersion, readOnly = true)
-      new RocksDBStateStore(endVersion)
-    }
-    catch {
-      case e: Throwable => throw QueryExecutionErrors.cannotLoadStore(e)
-    }
-  }
-
-  override def getStateStoreCDCReader(startVersion: Long, endVersion: Long): StateStoreCDCReader = {
-    val statePath = stateStoreId.storeCheckpointLocation()
-    val sparkConf = Option(SparkEnv.get).map(_.conf).getOrElse(new SparkConf)
-    new RocksDBStateStoreCDCReader(
-      CheckpointFileManager.create(statePath, hadoopConf),
-      statePath,
-      startVersion,
-      endVersion,
-      CompressionCodec.createCodec(sparkConf, storeConf.compressionCodec),
-      keySchema,
-      valueSchema)
   }
 
   override def doMaintenance(): Unit = {
@@ -413,6 +369,51 @@ private[sql] class RocksDBStateStoreProvider
 
   private def verify(condition: => Boolean, msg: String): Unit = {
     if (!condition) { throw new IllegalStateException(msg) }
+  }
+
+  override def replayStateFromSnapshot(startVersion: Long, endVersion: Long): StateStore = {
+    try {
+      if (startVersion < 1) {
+        throw QueryExecutionErrors.unexpectedStateStoreVersion(startVersion)
+      }
+      if (endVersion < startVersion) {
+        throw QueryExecutionErrors.unexpectedStateStoreVersion(endVersion)
+      }
+      rocksDB.loadFromSnapshot(startVersion, endVersion)
+      new RocksDBStateStore(endVersion)
+    }
+    catch {
+      case e: Throwable => throw QueryExecutionErrors.cannotLoadStore(e)
+    }
+  }
+
+  override def replayReadStateFromSnapshot(startVersion: Long, endVersion: Long): StateStore = {
+    try {
+      if (startVersion < 1) {
+        throw QueryExecutionErrors.unexpectedStateStoreVersion(startVersion)
+      }
+      if (endVersion < startVersion) {
+        throw QueryExecutionErrors.unexpectedStateStoreVersion(endVersion)
+      }
+      rocksDB.loadFromSnapshot(startVersion, endVersion)
+      new RocksDBStateStore(endVersion)
+    }
+    catch {
+      case e: Throwable => throw QueryExecutionErrors.cannotLoadStore(e)
+    }
+  }
+
+  override def getStateChangeDataReader(startVersion: Long, endVersion: Long): StateChangeDataReader = {
+    val statePath = stateStoreId.storeCheckpointLocation()
+    val sparkConf = Option(SparkEnv.get).map(_.conf).getOrElse(new SparkConf)
+    new RocksDBStateStoreCDCReader(
+      CheckpointFileManager.create(statePath, hadoopConf),
+      statePath,
+      startVersion,
+      endVersion,
+      CompressionCodec.createCodec(sparkConf, storeConf.compressionCodec),
+      keySchema,
+      valueSchema)
   }
 }
 

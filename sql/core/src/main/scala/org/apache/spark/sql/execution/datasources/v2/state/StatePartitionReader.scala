@@ -23,7 +23,7 @@ import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, Par
 import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions.StateDataSourceModeType
 import org.apache.spark.sql.execution.datasources.v2.state.metadata.StateMetadataPartitionReader
 import org.apache.spark.sql.execution.datasources.v2.state.utils.SchemaUtil
-import org.apache.spark.sql.execution.streaming.state.{NoPrefixKeyStateEncoderSpec, PrefixKeyScanStateEncoderSpec, ReadStateStore, StateStoreCDCReader, StateStoreConf, StateStoreId, StateStoreProvider, StateStoreProviderId}
+import org.apache.spark.sql.execution.streaming.state._
 import org.apache.spark.sql.execution.streaming.state.RecordType.{getRecordTypeAsString, RecordType}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.unsafe.types.UTF8String
@@ -105,9 +105,16 @@ class StatePartitionReader(
   private lazy val store: ReadStateStore = {
     partition.sourceOptions.snapshotStartBatchId match {
       case None => provider.getReadStore(partition.sourceOptions.batchId + 1)
-      case Some(snapshotStartBatchId) => provider.getReadStore(
-        snapshotStartBatchId + 1,
-        partition.sourceOptions.batchId + 1)
+
+      case Some(snapshotStartBatchId) =>
+        if (!provider.isInstanceOf[SupportsFineGrainedReplayFromSnapshot]) {
+          StateStoreErrors.stateStoreProviderDoesNotSupportFineGrainedReplay(
+            provider.getClass.toString)
+        }
+        provider.asInstanceOf[SupportsFineGrainedReplayFromSnapshot]
+          .replayReadStateFromSnapshot(
+            snapshotStartBatchId + 1,
+            partition.sourceOptions.batchId + 1)
     }
   }
 
@@ -150,8 +157,8 @@ class StateCDCPartitionReader(
   partition: StateStoreInputPartition,
   schema: StructType) extends StatePartitionReader(storeConf, hadoopConf, partition, schema) {
 
-  private lazy val cdcReader: StateStoreCDCReader = {
-    provider.getStateStoreCDCReader(
+  private lazy val cdcReader: StateChangeDataReader = {
+    provider.getStateChangeDataReader(
       partition.sourceOptions.cdcStartBatchID.get + 1,
       partition.sourceOptions.cdcEndBatchId.get + 1)
   }

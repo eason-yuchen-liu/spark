@@ -500,7 +500,12 @@ class SymmetricHashJoinStateManager(
         // This class will manage the state store provider by itself.
         initializeStateStoreProvider(keySchema, valueSchema)
         if (snapshotStartVersion.isDefined) {
-          stateStoreProvider.getStore(snapshotStartVersion.get, stateInfo.get.storeVersion)
+          if (!stateStoreProvider.isInstanceOf[SupportsFineGrainedReplayFromSnapshot]) {
+            StateStoreErrors.stateStoreProviderDoesNotSupportFineGrainedReplay(
+              stateStoreProvider.getClass.toString)
+          }
+          stateStoreProvider.asInstanceOf[SupportsFineGrainedReplayFromSnapshot]
+            .replayStateFromSnapshot(snapshotStartVersion.get, stateInfo.get.storeVersion)
         } else {
           stateStoreProvider.getStore(stateInfo.get.storeVersion)
         }

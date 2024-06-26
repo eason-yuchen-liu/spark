@@ -71,7 +71,8 @@ import org.apache.spark.util.ArrayImplicits._
  * to ensure re-executed RDD operations re-apply updates on the correct past version of the
  * store.
  */
-private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with Logging {
+private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with Logging
+  with SupportsFineGrainedReplayFromSnapshot {
 
   private val providerName = "HDFSBackedStateStoreProvider"
 
@@ -261,50 +262,12 @@ private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with 
     new HDFSBackedStateStore(version, newMap)
   }
 
-  /**
-   * Get the state store of endVersion for reading by applying delta files on the snapshot of
-   * startVersion. If startVersion does not exist, an error will be thrown.
-   *
-   * @param startVersion checkpoint version of the snapshot to start with
-   * @param endVersion   checkpoint version to end with
-   * @return [[HDFSBackedStateStore]]
-   */
-  override def getStore(startVersion: Long, endVersion: Long): StateStore = {
-    val newMap = getLoadedMapForStore(startVersion, endVersion)
-    logInfo(log"Retrieved version ${MDC(LogKeys.STATE_STORE_VERSION, startVersion)} to " +
-      log"${MDC(LogKeys.STATE_STORE_VERSION, endVersion)} of " +
-      log"${MDC(LogKeys.STATE_STORE_PROVIDER, HDFSBackedStateStoreProvider.this)} for update")
-    new HDFSBackedStateStore(endVersion, newMap)
-  }
-
   /** Get the state store for reading to specific `version` of the store. */
   override def getReadStore(version: Long): ReadStateStore = {
     val newMap = getLoadedMapForStore(version)
     logInfo(log"Retrieved version ${MDC(LogKeys.STATE_STORE_VERSION, version)} of " +
       log"${MDC(LogKeys.STATE_STORE_PROVIDER, HDFSBackedStateStoreProvider.this)} for readonly")
     new HDFSBackedReadStateStore(version, newMap)
-  }
-
-  /**
-   * Get the state store of endVersion for reading by applying delta files on the snapshot of
-   * startVersion. If startVersion does not exist, an error will be thrown.
-   *
-   * @param startVersion checkpoint version of the snapshot to start with
-   * @param endVersion   checkpoint version to end with
-   * @return [[HDFSBackedReadStateStore]]
-   */
-  override def getReadStore(startVersion: Long, endVersion: Long): ReadStateStore = {
-    val newMap = getLoadedMapForStore(startVersion, endVersion)
-    logInfo(log"Retrieved version ${MDC(LogKeys.STATE_STORE_VERSION, startVersion)} to " +
-      log"${MDC(LogKeys.STATE_STORE_VERSION, endVersion)} of " +
-      log"${MDC(LogKeys.STATE_STORE_PROVIDER, HDFSBackedStateStoreProvider.this)} for readonly")
-    new HDFSBackedReadStateStore(endVersion, newMap)
-  }
-
-  override def getStateStoreCDCReader(startVersion: Long, endVersion: Long): StateStoreCDCReader = {
-    new HDFSBackedStateStoreCDCReader(fm, baseDir, startVersion, endVersion,
-      CompressionCodec.createCodec(sparkConf, storeConf.compressionCodec),
-      keySchema, valueSchema)
   }
 
   private def getLoadedMapForStore(version: Long): HDFSBackedStateStoreMap = synchronized {
@@ -315,27 +278,6 @@ private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with 
       val newMap = HDFSBackedStateStoreMap.create(keySchema, numColsPrefixKey)
       if (version > 0) {
         newMap.putAll(loadMap(version))
-      }
-      newMap
-    }
-    catch {
-      case e: Throwable => throw QueryExecutionErrors.cannotLoadStore(e)
-    }
-  }
-
-  private def getLoadedMapForStore(startVersion: Long, endVersion: Long):
-    HDFSBackedStateStoreMap = synchronized {
-    try {
-      if (startVersion < 1) {
-        throw QueryExecutionErrors.unexpectedStateStoreVersion(startVersion)
-      }
-      if (endVersion < startVersion || endVersion < 0) {
-        throw QueryExecutionErrors.unexpectedStateStoreVersion(endVersion)
-      }
-
-      val newMap = HDFSBackedStateStoreMap.create(keySchema, numColsPrefixKey)
-      if (endVersion != 0) {
-        newMap.putAll(loadMap(startVersion, endVersion))
       }
       newMap
     }
@@ -603,42 +545,6 @@ private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with 
     result
   }
 
-  private def loadMap(startVersion: Long, endVersion: Long): HDFSBackedStateStoreMap = {
-
-    val (result, elapsedMs) = Utils.timeTakenMs {
-      val startVersionMap = Option(loadedMaps.get(startVersion)) match {
-        case Some(value) =>
-          loadedMapCacheHitCount.increment()
-          Option(value)
-        case None =>
-          logWarning(
-            log"The state for version ${MDC(LogKeys.FILE_VERSION, startVersion)} doesn't " +
-            log"exist in loadedMaps. Reading snapshot file and delta files if needed..." +
-            log"Note that this is normal for the first batch of starting query.")
-          loadedMapCacheMissCount.increment()
-          readSnapshotFile(startVersion)
-      }
-      if (startVersionMap.isEmpty) {
-        throw StateStoreErrors.stateStoreSnapshotFileNotFound(
-          snapshotFile(startVersion).toString, toString())
-      }
-      synchronized { putStateIntoStateCacheMap(startVersion, startVersionMap.get) }
-
-      // Load all the deltas from the version after the start version up to the end version.
-      val resultMap = HDFSBackedStateStoreMap.create(keySchema, numColsPrefixKey)
-      resultMap.putAll(startVersionMap.get)
-      for (deltaVersion <- startVersion + 1 to endVersion) {
-        updateFromDeltaFile(deltaVersion, resultMap)
-      }
-
-      resultMap
-    }
-
-    logDebug(s"Loading state from $startVersion to $endVersion takes $elapsedMs ms.")
-
-    result
-  }
-
   private def writeUpdateToDeltaFile(
       output: DataOutputStream,
       key: UnsafeRow,
@@ -779,8 +685,7 @@ private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with 
   }
 
   /**
-   * try to read the snapshot file of the given version.
-   * If the snapshot file is not available, return [[None]].
+   * Try to read the snapshot file. If the snapshot file is not available, return [[None]].
    *
    * @param version the version of the snapshot file
   */
@@ -983,5 +888,97 @@ private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with 
     if (!condition) {
       throw new IllegalStateException(msg)
     }
+  }
+
+  /**
+   * Get the state store of endVersion for reading by applying delta files on the snapshot of
+   * startVersion. If snapshot for startVersion does not exist, an error will be thrown.
+   *
+   * @param startVersion checkpoint version of the snapshot to start with
+   * @param endVersion   checkpoint version to end with
+   * @return [[HDFSBackedStateStore]]
+   */
+  override def replayStateFromSnapshot(startVersion: Long, endVersion: Long): StateStore = {
+    val newMap = replayLoadedMapForStoreFromSnapshot(startVersion, endVersion)
+    logInfo(log"Retrieved version ${MDC(LogKeys.STATE_STORE_VERSION, startVersion)} to " +
+      log"${MDC(LogKeys.STATE_STORE_VERSION, endVersion)} of " +
+      log"${MDC(LogKeys.STATE_STORE_PROVIDER, HDFSBackedStateStoreProvider.this)} for update")
+    new HDFSBackedStateStore(endVersion, newMap)
+  }
+
+  /**
+   * Get the state store of endVersion for reading by applying delta files on the snapshot of
+   * startVersion. If snapshot for startVersion does not exist, an error will be thrown.
+   *
+   * @param startVersion checkpoint version of the snapshot to start with
+   * @param endVersion   checkpoint version to end with
+   * @return [[HDFSBackedReadStateStore]]
+   */
+  override def replayReadStateFromSnapshot(startVersion: Long, endVersion: Long): ReadStateStore = {
+    val newMap = replayLoadedMapForStoreFromSnapshot(startVersion, endVersion)
+    logInfo(log"Retrieved version ${MDC(LogKeys.STATE_STORE_VERSION, startVersion)} to " +
+      log"${MDC(LogKeys.STATE_STORE_VERSION, endVersion)} of " +
+      log"${MDC(LogKeys.STATE_STORE_PROVIDER, HDFSBackedStateStoreProvider.this)} for readonly")
+    new HDFSBackedReadStateStore(endVersion, newMap)
+  }
+
+  /**
+   * Consturct the state at endVersion from snapshot from startVersion.
+   * Returns a new [[HDFSBackedStateStoreMap]]
+   * @param startVersion checkpoint version of the snapshot to start with
+   * @param endVersion   checkpoint version to end with
+   */
+  private def replayLoadedMapForStoreFromSnapshot(startVersion: Long, endVersion: Long):
+  HDFSBackedStateStoreMap = synchronized {
+    try {
+      if (startVersion < 1) {
+        throw QueryExecutionErrors.unexpectedStateStoreVersion(startVersion)
+      }
+      if (endVersion < startVersion || endVersion < 0) {
+        throw QueryExecutionErrors.unexpectedStateStoreVersion(endVersion)
+      }
+
+      val newMap = HDFSBackedStateStoreMap.create(keySchema, numColsPrefixKey)
+      if (endVersion != 0) {
+        newMap.putAll(constructMapFromSnapshot(startVersion, endVersion))
+      }
+      newMap
+    }
+    catch {
+      case e: Throwable => throw QueryExecutionErrors.cannotLoadStore(e)
+    }
+  }
+
+  private def constructMapFromSnapshot(startVersion: Long, endVersion: Long):
+  HDFSBackedStateStoreMap = {
+    val (result, elapsedMs) = Utils.timeTakenMs {
+      val startVersionMap = synchronized { Option(loadedMaps.get(startVersion)) } match {
+        case Some(value) => Option(value)
+        case None => readSnapshotFile(startVersion)
+      }
+      if (startVersionMap.isEmpty) {
+        throw StateStoreErrors.stateStoreSnapshotFileNotFound(
+          snapshotFile(startVersion).toString, toString())
+      }
+
+      // Load all the deltas from the version after the start version up to the end version.
+      val resultMap = HDFSBackedStateStoreMap.create(keySchema, numColsPrefixKey)
+      resultMap.putAll(startVersionMap.get)
+      for (deltaVersion <- startVersion + 1 to endVersion) {
+        updateFromDeltaFile(deltaVersion, resultMap)
+      }
+
+      resultMap
+    }
+
+    logDebug(s"Loading state from $startVersion to $endVersion takes $elapsedMs ms.")
+
+    result
+  }
+
+  override def getStateChangeDataReader(startVersion: Long, endVersion: Long): StateChangeDataReader = {
+    new HDFSBackedStateStoreCDCReader(fm, baseDir, startVersion, endVersion,
+      CompressionCodec.createCodec(sparkConf, storeConf.compressionCodec),
+      keySchema, valueSchema)
   }
 }

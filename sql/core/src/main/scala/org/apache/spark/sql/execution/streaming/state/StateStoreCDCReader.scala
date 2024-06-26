@@ -27,12 +27,20 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.util.NextIterator
 
 /**
+ * This is an optional trait for [[StateStoreProvider]]s to mix in if they support reading state
+ * change data. It is used by the readChangeFeed option of State Data Source.
+ */
+trait SupportsStateChangeDataFeed {
+  def getStateChangeDataReader(startVersion: Long, endVersion: Long): StateChangeDataReader
+}
+
+/**
  * Base class for state store changelog reader
  * @param fm - checkpoint file manager used to manage streaming query checkpoint
  * @param fileToRead - name of file to use to read changelog
  * @param compressionCodec - de-compression method using for reading changelog file
  */
-abstract class StateStoreCDCReader(
+abstract class StateChangeDataReader(
     fm: CheckpointFileManager,
     stateLocation: Path,
     startVersion: Long,
@@ -85,7 +93,7 @@ class HDFSBackedStateStoreCDCReader(
     keySchema: StructType,
     valueSchema: StructType
   )
-  extends StateStoreCDCReader(
+  extends StateChangeDataReader(
     fm, stateLocation, startVersion, endVersion, compressionCodec) {
   override protected var changelogSuffix: String = "delta"
 
@@ -132,7 +140,7 @@ class RocksDBStateStoreCDCReader(
   keySchema: StructType,
   valueSchema: StructType
 )
-  extends StateStoreCDCReader(
+  extends StateChangeDataReader(
     fm, stateLocation, startVersion, endVersion, compressionCodec) {
   override protected var changelogSuffix: String = "changelog"
 

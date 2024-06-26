@@ -227,16 +227,17 @@ class RocksDB(
   }
 
   /**
-   * Load from the start checkpoint version and apply all the changelog records to reach the
-   * end version. Note that this will copy all the necessary file from DFS to local disk as needed,
+   * Load from the start snapshot version and apply all the changelog records to reach the
+   * end version. Note that this will copy all the necessary files from DFS to local disk as needed,
    * and possibly restart the native RocksDB instance.
    *
-   * @param startVersion
-   * @param endVersion
-   * @param readOnly
-   * @return
+   * @param startVersion version of the snapshot to start with
+   * @param endVersion end version
+   * @return A RocksDB instance loaded with the state endVersion replayed from startVersion.
+   *         Note that the instance will be read-only since this method is only used in State Data
+   *         Source.
    */
-  def load(startVersion: Long, endVersion: Long, readOnly: Boolean): RocksDB = {
+  def loadFromSnapshot(startVersion: Long, endVersion: Long): RocksDB = {
     assert(startVersion >= 0 && endVersion >= startVersion)
     acquire(LoadStore)
     recordedMetrics = None
@@ -244,7 +245,7 @@ class RocksDB(
       log"Loading ${MDC(LogKeys.VERSION_NUM, endVersion)} from " +
       log"${MDC(LogKeys.VERSION_NUM, startVersion)}")
     try {
-      loadFromCheckpoint(startVersion, endVersion)
+      replayFromCheckpoint(startVersion, endVersion)
 
       logInfo(
         log"Loaded ${MDC(LogKeys.VERSION_NUM, endVersion)} from " +
@@ -253,11 +254,6 @@ class RocksDB(
       case t: Throwable =>
         loadedVersion = -1  // invalidate loaded data
         throw t
-    }
-    if (enableChangelogCheckpointing && !readOnly) {
-      // Make sure we don't leak resource.
-      changelogWriter.foreach(_.abort())
-      changelogWriter = Some(fileManager.getChangeLogWriter(endVersion + 1, useColumnFamilies))
     }
     this
   }
@@ -270,7 +266,7 @@ class RocksDB(
    * @param startVersion start checkpoint version
    * @param endVersion end version
    */
-  def loadFromCheckpoint(startVersion: Long, endVersion: Long): Any = {
+  private def replayFromCheckpoint(startVersion: Long, endVersion: Long): Any = {
     if (loadedVersion != startVersion) {
       closeDB()
       val metadata = fileManager.loadCheckpointFromDfs(startVersion, workingDir)

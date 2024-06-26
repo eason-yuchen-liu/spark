@@ -35,7 +35,7 @@ import org.apache.spark.util.Utils
 
 private[sql] class RocksDBStateStoreProvider
   extends StateStoreProvider with Logging with Closeable
-    with SupportsFineGrainedReplayFromSnapshot {
+    with SupportsFineGrainedReplayFromSnapshot with SupportsStateStoreChangeDataFeed {
   import RocksDBStateStoreProvider._
 
   class RocksDBStateStore(lastVersion: Long) extends StateStore {
@@ -403,7 +403,8 @@ private[sql] class RocksDBStateStoreProvider
     }
   }
 
-  override def getStateChangeDataReader(startVersion: Long, endVersion: Long): StateChangeDataReader = {
+  override def getStateStoreChangeDataReader(startVersion: Long, endVersion: Long):
+    StateStoreChangeDataReader = {
     val statePath = stateStoreId.storeCheckpointLocation()
     val sparkConf = Option(SparkEnv.get).map(_.conf).getOrElse(new SparkConf)
     new RocksDBStateStoreCDCReader(

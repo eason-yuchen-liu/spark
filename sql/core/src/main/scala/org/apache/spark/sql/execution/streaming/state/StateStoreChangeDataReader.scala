@@ -30,8 +30,9 @@ import org.apache.spark.util.NextIterator
  * This is an optional trait for [[StateStoreProvider]]s to mix in if they support reading state
  * change data. It is used by the readChangeFeed option of State Data Source.
  */
-trait SupportsStateChangeDataFeed {
-  def getStateChangeDataReader(startVersion: Long, endVersion: Long): StateChangeDataReader
+trait SupportsStateStoreChangeDataFeed {
+  def getStateStoreChangeDataReader(startVersion: Long, endVersion: Long):
+    StateStoreChangeDataReader
 }
 
 /**
@@ -40,7 +41,7 @@ trait SupportsStateChangeDataFeed {
  * @param fileToRead - name of file to use to read changelog
  * @param compressionCodec - de-compression method using for reading changelog file
  */
-abstract class StateChangeDataReader(
+abstract class StateStoreChangeDataReader(
     fm: CheckpointFileManager,
     stateLocation: Path,
     startVersion: Long,
@@ -93,7 +94,7 @@ class HDFSBackedStateStoreCDCReader(
     keySchema: StructType,
     valueSchema: StructType
   )
-  extends StateChangeDataReader(
+  extends StateStoreChangeDataReader(
     fm, stateLocation, startVersion, endVersion, compressionCodec) {
   override protected var changelogSuffix: String = "delta"
 
@@ -140,7 +141,7 @@ class RocksDBStateStoreCDCReader(
   keySchema: StructType,
   valueSchema: StructType
 )
-  extends StateChangeDataReader(
+  extends StateStoreChangeDataReader(
     fm, stateLocation, startVersion, endVersion, compressionCodec) {
   override protected var changelogSuffix: String = "changelog"
 

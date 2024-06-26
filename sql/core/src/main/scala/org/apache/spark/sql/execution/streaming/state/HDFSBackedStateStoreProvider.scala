@@ -72,7 +72,7 @@ import org.apache.spark.util.ArrayImplicits._
  * store.
  */
 private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with Logging
-  with SupportsFineGrainedReplayFromSnapshot {
+  with SupportsFineGrainedReplayFromSnapshot with SupportsStateStoreChangeDataFeed {
 
   private val providerName = "HDFSBackedStateStoreProvider"
 
@@ -976,7 +976,8 @@ private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with 
     result
   }
 
-  override def getStateChangeDataReader(startVersion: Long, endVersion: Long): StateChangeDataReader = {
+  override def getStateStoreChangeDataReader(startVersion: Long, endVersion: Long):
+    StateStoreChangeDataReader = {
     new HDFSBackedStateStoreCDCReader(fm, baseDir, startVersion, endVersion,
       CompressionCodec.createCodec(sparkConf, storeConf.compressionCodec),
       keySchema, valueSchema)

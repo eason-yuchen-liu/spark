@@ -41,7 +41,7 @@ class StatePartitionReaderFactory(
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
     val stateStoreInputPartition = partition.asInstanceOf[StateStoreInputPartition]
     if (stateStoreInputPartition.sourceOptions.modeType == StateDataSourceModeType.CDC) {
-      new StateCDCPartitionReader(storeConf, hadoopConf,
+      new StateStoreChangeDataPartitionReader(storeConf, hadoopConf,
         stateStoreInputPartition, schema)
     } else {
       new StatePartitionReader(storeConf, hadoopConf,
@@ -151,16 +151,17 @@ class StatePartitionReader(
   }
 }
 
-class StateCDCPartitionReader(
+class StateStoreChangeDataPartitionReader(
   storeConf: StateStoreConf,
   hadoopConf: SerializableConfiguration,
   partition: StateStoreInputPartition,
   schema: StructType) extends StatePartitionReader(storeConf, hadoopConf, partition, schema) {
 
-  private lazy val cdcReader: StateChangeDataReader = {
-    provider.getStateChangeDataReader(
-      partition.sourceOptions.cdcStartBatchID.get + 1,
-      partition.sourceOptions.cdcEndBatchId.get + 1)
+  private lazy val cdcReader: StateStoreChangeDataReader = {
+    provider.asInstanceOf[SupportsStateStoreChangeDataFeed]
+      .getStateStoreChangeDataReader(
+        partition.sourceOptions.cdcStartBatchID.get + 1,
+        partition.sourceOptions.cdcEndBatchId.get + 1)
   }
 
   override protected lazy val iter: Iterator[InternalRow] = {

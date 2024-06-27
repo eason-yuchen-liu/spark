@@ -35,7 +35,7 @@ import org.apache.spark.util.Utils
 
 private[sql] class RocksDBStateStoreProvider
   extends StateStoreProvider with Logging with Closeable
-    with SupportsFineGrainedReplayFromSnapshot with SupportsStateStoreChangeDataFeed {
+  with SupportsFineGrainedReplay {
   import RocksDBStateStoreProvider._
 
   class RocksDBStateStore(lastVersion: Long) extends StateStore {
@@ -371,31 +371,15 @@ private[sql] class RocksDBStateStoreProvider
     if (!condition) { throw new IllegalStateException(msg) }
   }
 
-  override def replayStateFromSnapshot(startVersion: Long, endVersion: Long): StateStore = {
+  override def replayStateFromSnapshot(snapshotVersion: Long, endVersion: Long): StateStore = {
     try {
-      if (startVersion < 1) {
-        throw QueryExecutionErrors.unexpectedStateStoreVersion(startVersion)
+      if (snapshotVersion < 1) {
+        throw QueryExecutionErrors.unexpectedStateStoreVersion(snapshotVersion)
       }
-      if (endVersion < startVersion) {
+      if (endVersion < snapshotVersion) {
         throw QueryExecutionErrors.unexpectedStateStoreVersion(endVersion)
       }
-      rocksDB.loadFromSnapshot(startVersion, endVersion)
-      new RocksDBStateStore(endVersion)
-    }
-    catch {
-      case e: Throwable => throw QueryExecutionErrors.cannotLoadStore(e)
-    }
-  }
-
-  override def replayReadStateFromSnapshot(startVersion: Long, endVersion: Long): StateStore = {
-    try {
-      if (startVersion < 1) {
-        throw QueryExecutionErrors.unexpectedStateStoreVersion(startVersion)
-      }
-      if (endVersion < startVersion) {
-        throw QueryExecutionErrors.unexpectedStateStoreVersion(endVersion)
-      }
-      rocksDB.loadFromSnapshot(startVersion, endVersion)
+      rocksDB.loadFromSnapshot(snapshotVersion, endVersion)
       new RocksDBStateStore(endVersion)
     }
     catch {

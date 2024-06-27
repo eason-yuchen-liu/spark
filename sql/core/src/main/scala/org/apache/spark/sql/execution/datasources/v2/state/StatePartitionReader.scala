@@ -158,7 +158,11 @@ class StateStoreChangeDataPartitionReader(
   schema: StructType) extends StatePartitionReader(storeConf, hadoopConf, partition, schema) {
 
   private lazy val cdcReader: StateStoreChangeDataReader = {
-    provider.asInstanceOf[SupportsStateStoreChangeDataFeed]
+    if (!provider.isInstanceOf[SupportsFineGrainedReplay]) {
+      throw StateStoreErrors.stateStoreProviderDoesNotSupportFineGrainedReplay(
+        provider.getClass.toString)
+    }
+    provider.asInstanceOf[SupportsFineGrainedReplay]
       .getStateStoreChangeDataReader(
         partition.sourceOptions.cdcStartBatchID.get + 1,
         partition.sourceOptions.cdcEndBatchId.get + 1)

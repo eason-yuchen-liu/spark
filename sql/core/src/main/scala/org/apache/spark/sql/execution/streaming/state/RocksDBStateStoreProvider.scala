@@ -397,8 +397,7 @@ private[sql] class RocksDBStateStoreProvider
       startVersion,
       endVersion,
       CompressionCodec.createCodec(sparkConf, storeConf.compressionCodec),
-      keySchema,
-      valueSchema)
+      keyValueEncoderMap)
   }
 }
 

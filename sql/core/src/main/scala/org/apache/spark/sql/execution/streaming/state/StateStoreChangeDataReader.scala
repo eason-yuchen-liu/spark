@@ -17,6 +17,8 @@
 
 package org.apache.spark.sql.execution.streaming.state
 
+import java.util.concurrent.ConcurrentHashMap
+
 import org.apache.hadoop.fs.Path
 
 import org.apache.spark.internal.Logging
@@ -107,13 +109,17 @@ class HDFSBackedStateStoreCDCReader(
     val readResult = currentChangelogReader.next()
     val keyRow = new UnsafeRow(keySchema.fields.length)
     keyRow.pointTo(readResult._2, readResult._2.length)
-    val valueRow = new UnsafeRow(valueSchema.fields.length)
-    // If valueSize in existing file is not multiple of 8, floor it to multiple of 8.
-    // This is a workaround for the following:
-    // Prior to Spark 2.3 mistakenly append 4 bytes to the value row in
-    // `RowBasedKeyValueBatch`, which gets persisted into the checkpoint data
-    valueRow.pointTo(readResult._3, (readResult._3.length / 8) * 8)
-    (readResult._1, keyRow, valueRow, fileIterator.getVersion - 1)
+    if (readResult._3 == null) {
+      (readResult._1, keyRow, null, fileIterator.getVersion - 1)
+    } else {
+      val valueRow = new UnsafeRow(valueSchema.fields.length)
+      // If valueSize in existing file is not multiple of 8, floor it to multiple of 8.
+      // This is a workaround for the following:
+      // Prior to Spark 2.3 mistakenly append 4 bytes to the value row in
+      // `RowBasedKeyValueBatch`, which gets persisted into the checkpoint data
+      valueRow.pointTo(readResult._3, (readResult._3.length / 8) * 8)
+      (readResult._1, keyRow, valueRow, fileIterator.getVersion - 1)
+    }
   }
 
   override def close(): Unit = {
@@ -129,8 +135,7 @@ class RocksDBStateStoreCDCReader(
   startVersion: Long,
   endVersion: Long,
   compressionCodec: CompressionCodec,
-  keySchema: StructType,
-  valueSchema: StructType
+  keyValueEncoderMap: ConcurrentHashMap[String, (RocksDBKeyStateEncoder, RocksDBValueStateEncoder)]
 )
   extends StateStoreChangeDataReader(
     fm, stateLocation, startVersion, endVersion, compressionCodec) {
@@ -152,16 +157,23 @@ class RocksDBStateStoreCDCReader(
         new StateStoreChangelogReaderV1(fm, fileIterator.next(), compressionCodec)
     }
 
-    val readResult = currentChangelogReader.next()
-    val keyRow = new UnsafeRow(keySchema.fields.length)
-    keyRow.pointTo(readResult._2, readResult._2.length)
-    val valueRow = new UnsafeRow(valueSchema.fields.length)
-    // If valueSize in existing file is not multiple of 8, floor it to multiple of 8.
-    // This is a workaround for the following:
-    // Prior to Spark 2.3 mistakenly append 4 bytes to the value row in
-    // `RowBasedKeyValueBatch`, which gets persisted into the checkpoint data
-    valueRow.pointTo(readResult._3, (readResult._3.length / 8) * 8)
-    (readResult._1, keyRow, valueRow, fileIterator.getVersion - 1)
+    val (recordType, keyArray, valueArray, columnFamily) = currentChangelogReader.next()
+    val (rocksDBKeyStateEncoder, rocksDBValueStateEncoder) = keyValueEncoderMap.get(columnFamily)
+//    val keyRow = new UnsafeRow(keySchema.fields.length)
+//    keyRow.pointTo(readResult._2, readResult._2.length)
+    val keyRow = rocksDBKeyStateEncoder.decodeKey(keyArray)
+    if (valueArray == null) {
+      (recordType, keyRow, null, fileIterator.getVersion - 1)
+    } else {
+//      val valueRow = new UnsafeRow(valueSchema.fields.length)
+      // If valueSize in existing file is not multiple of 8, floor it to multiple of 8.
+      // This is a workaround for the following:
+      // Prior to Spark 2.3 mistakenly append 4 bytes to the value row in
+      // `RowBasedKeyValueBatch`, which gets persisted into the checkpoint data
+//      valueRow.pointTo(readResult._3, (readResult._3.length))
+      val valueRow = rocksDBValueStateEncoder.decodeValue(valueArray)
+      (recordType, keyRow, valueRow, fileIterator.getVersion - 1)
+    }
   }
 
   override def close(): Unit = {

@@ -494,7 +494,7 @@ abstract class StateDataSourceReadSuite extends StateDataSourceTestBase with Ass
    * @param checkpointDir        path to store state information
    * @return instance of class extending [[StateStoreProvider]]
    */
-  def getNewStateStoreProvider(checkpointDir: String): StateStoreProvider = {
+  private def getNewStateStoreProvider(checkpointDir: String): StateStoreProvider = {
     val provider = newStateStoreProvider()
     provider.init(
       StateStoreId(checkpointDir, 0, 0),

@@ -30,16 +30,6 @@ import org.apache.spark.sql.types.StructType
 class HDFSBackedStateDataSourceReadCDCSuite extends StateDataSourceChangeDataReadSuite {
   override protected def newStateStoreProvider(): HDFSBackedStateStoreProvider =
     new HDFSBackedStateStoreProvider
-
-  override def beforeAll(): Unit = {
-    super.beforeAll()
-    spark.conf.set(SQLConf.STATE_STORE_PROVIDER_CLASS.key,
-      newStateStoreProvider().getClass.getName)
-    // make sure we have a snapshot for every two delta files
-    // HDFS maintenance task will not count the latest delta file, which has the same version
-    // as the snapshot version
-    spark.conf.set(SQLConf.STREAMING_NO_DATA_MICRO_BATCHES_ENABLED, false)
-  }
 }
 
 class RocksDBWithChangelogCheckpointStateDataSourceCDCReaderSuite extends
@@ -49,13 +39,8 @@ StateDataSourceChangeDataReadSuite {
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    spark.conf.set(SQLConf.STATE_STORE_PROVIDER_CLASS.key,
-      newStateStoreProvider().getClass.getName)
     spark.conf.set("spark.sql.streaming.stateStore.rocksdb.changelogCheckpointing.enabled",
       "true")
-    // make sure we have a snapshot for every other checkpoint
-    // RocksDB maintenance task will count the latest checkpoint, so we need to set it to 2
-    spark.conf.set(SQLConf.STREAMING_NO_DATA_MICRO_BATCHES_ENABLED, false)
   }
 }
 
@@ -69,11 +54,17 @@ abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBas
 
   protected def newStateStoreProvider(): StateStoreProvider
 
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    spark.conf.set(SQLConf.STREAMING_NO_DATA_MICRO_BATCHES_ENABLED, false)
+    spark.conf.set(SQLConf.STATE_STORE_PROVIDER_CLASS.key, newStateStoreProvider().getClass.getName)
+  }
+
   /**
    * Calls the overridable [[newStateStoreProvider]] to create the state store provider instance.
    * Initialize it with the configuration set by child classes.
    *
-   * @param checkpointDir        path to store state information
+   * @param checkpointDir path to store state information
    * @return instance of class extending [[StateStoreProvider]]
    */
   private def getNewStateStoreProvider(checkpointDir: String): StateStoreProvider = {
@@ -89,7 +80,7 @@ abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBas
     provider
   }
 
-  test("new getChangeDataReader API of state store provider") {
+  test("getChangeDataReader of state store provider") {
     def withNewStateStore(provider: StateStoreProvider, version: Int)(f: StateStore => Unit):
       Unit = {
       val stateStore = provider.getStore(version)
@@ -111,16 +102,16 @@ abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBas
       val reader =
         provider.asInstanceOf[SupportsFineGrainedReplay].getStateStoreChangeDataReader(1, 4)
 
-      assert(reader.next() === (RecordType.PUT_RECORD, dataToKeyRow("a", 1), dataToValueRow(1), 0))
-      assert(reader.next() === (RecordType.PUT_RECORD, dataToKeyRow("b", 2), dataToValueRow(2), 1))
+      assert(reader.next() === (RecordType.PUT_RECORD, dataToKeyRow("a", 1), dataToValueRow(1), 0L))
+      assert(reader.next() === (RecordType.PUT_RECORD, dataToKeyRow("b", 2), dataToValueRow(2), 1L))
       assert(reader.next() ===
-        (RecordType.DELETE_RECORD, dataToKeyRow("a", 1), null, 2))
+        (RecordType.DELETE_RECORD, dataToKeyRow("a", 1), null, 2L))
       assert(reader.next() ===
-        (RecordType.DELETE_RECORD, dataToKeyRow("b", 2), null, 3))
+        (RecordType.DELETE_RECORD, dataToKeyRow("b", 2), null, 3L))
     }
   }
 
-  test("cdc read limit state") {
+  test("read limit state change feed") {
     withTempDir { tempDir =>
       val inputData = MemoryStream[Int]
       val df = inputData.toDF().limit(10)
@@ -136,21 +127,21 @@ abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBas
 
       val stateDf = spark.read.format("statestore")
         .option(StateSourceOptions.MODE_TYPE, "cdc")
-        .option(StateSourceOptions.CDC_START_BATCH_ID, 0)
-        .option(StateSourceOptions.CDC_END_BATCH_ID, 2)
+        .option(StateSourceOptions.CHANGE_START_BATCH_ID, 0)
+        .option(StateSourceOptions.CHANGE_END_BATCH_ID, 2)
         .load(tempDir.getAbsolutePath)
 
       val expectedDf = Seq(
-        Row(Row(null), Row(4), "PUT", 0, 0),
-        Row(Row(null), Row(8), "PUT", 1, 0),
-        Row(Row(null), Row(10), "PUT", 2, 0)
+        Row(Row(null), Row(4), "PUT", 0L, 0),
+        Row(Row(null), Row(8), "PUT", 1L, 0),
+        Row(Row(null), Row(10), "PUT", 2L, 0)
       )
 
       checkAnswer(stateDf, expectedDf)
     }
   }
 
-  test("cdc read aggregate state") {
+  test("read aggregate state change feed") {
     withTempDir { tempDir =>
       val inputData = MemoryStream[Int]
       val df = inputData.toDF().groupBy("value").count()
@@ -166,30 +157,30 @@ abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBas
 
       val stateDf = spark.read.format("statestore")
         .option(StateSourceOptions.MODE_TYPE, "cdc")
-        .option(StateSourceOptions.CDC_START_BATCH_ID, 0)
-        .option(StateSourceOptions.CDC_END_BATCH_ID, 2)
+        .option(StateSourceOptions.CHANGE_START_BATCH_ID, 0)
+        .option(StateSourceOptions.CHANGE_END_BATCH_ID, 2)
         .load(tempDir.getAbsolutePath)
 
       val expectedDf = Seq(
-        Row(Row(3), Row(1), "PUT", 0, 1),
-        Row(Row(3), Row(2), "PUT", 1, 1),
-        Row(Row(5), Row(1), "PUT", 1, 1),
-        Row(Row(3), Row(3), "PUT", 2, 1),
-        Row(Row(5), Row(2), "PUT", 2, 1),
-        Row(Row(4), Row(1), "PUT", 0, 2),
-        Row(Row(4), Row(2), "PUT", 1, 2),
-        Row(Row(4), Row(3), "PUT", 2, 2),
-        Row(Row(1), Row(1), "PUT", 0, 3),
-        Row(Row(2), Row(1), "PUT", 0, 4),
-        Row(Row(2), Row(2), "PUT", 1, 4),
-        Row(Row(6), Row(1), "PUT", 2, 4)
+        Row(Row(3), Row(1), "PUT", 0L, 1),
+        Row(Row(3), Row(2), "PUT", 1L, 1),
+        Row(Row(5), Row(1), "PUT", 1L, 1),
+        Row(Row(3), Row(3), "PUT", 2L, 1),
+        Row(Row(5), Row(2), "PUT", 2L, 1),
+        Row(Row(4), Row(1), "PUT", 0L, 2),
+        Row(Row(4), Row(2), "PUT", 1L, 2),
+        Row(Row(4), Row(3), "PUT", 2L, 2),
+        Row(Row(1), Row(1), "PUT", 0L, 3),
+        Row(Row(2), Row(1), "PUT", 0L, 4),
+        Row(Row(2), Row(2), "PUT", 1L, 4),
+        Row(Row(6), Row(1), "PUT", 2L, 4)
       )
 
       checkAnswer(stateDf, expectedDf)
     }
   }
 
-  test("cdc read deduplication state") {
+  test("read deduplication state change feed") {
     withTempDir { tempDir =>
       val inputData = MemoryStream[Int]
       val df = inputData.toDF().dropDuplicates("value")
@@ -205,24 +196,24 @@ abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBas
 
       val stateDf = spark.read.format("statestore")
         .option(StateSourceOptions.MODE_TYPE, "cdc")
-        .option(StateSourceOptions.CDC_START_BATCH_ID, 0)
-        .option(StateSourceOptions.CDC_END_BATCH_ID, 2)
+        .option(StateSourceOptions.CHANGE_START_BATCH_ID, 0)
+        .option(StateSourceOptions.CHANGE_END_BATCH_ID, 2)
         .load(tempDir.getAbsolutePath)
 
       val expectedDf = Seq(
-        Row(Row(1), Row(null), "PUT", 0, 3),
-        Row(Row(2), Row(null), "PUT", 0, 4),
-        Row(Row(3), Row(null), "PUT", 0, 1),
-        Row(Row(4), Row(null), "PUT", 0, 2),
-        Row(Row(5), Row(null), "PUT", 1, 1),
-        Row(Row(6), Row(null), "PUT", 2, 4)
+        Row(Row(1), Row(null), "PUT", 0L, 3),
+        Row(Row(2), Row(null), "PUT", 0L, 4),
+        Row(Row(3), Row(null), "PUT", 0L, 1),
+        Row(Row(4), Row(null), "PUT", 0L, 2),
+        Row(Row(5), Row(null), "PUT", 1L, 1),
+        Row(Row(6), Row(null), "PUT", 2L, 4)
       )
 
       checkAnswer(stateDf, expectedDf)
     }
   }
 
-  test("cdc read stream-stream join state") {
+  test("read stream-stream join state change feed") {
     withTempDir { tempDir =>
       val inputData = MemoryStream[(Int, Long)]
       val leftDf =
@@ -242,16 +233,16 @@ abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBas
       val keyWithIndexToValueDf = spark.read.format("statestore")
         .option(StateSourceOptions.STORE_NAME, "left-keyWithIndexToValue")
         .option(StateSourceOptions.MODE_TYPE, "cdc")
-        .option(StateSourceOptions.CDC_START_BATCH_ID, 0)
-        .option(StateSourceOptions.CDC_END_BATCH_ID, 1)
+        .option(StateSourceOptions.CHANGE_START_BATCH_ID, 0)
+        .option(StateSourceOptions.CHANGE_END_BATCH_ID, 1)
         .load(tempDir.getAbsolutePath)
 
       val keyWithIndexToValueExpectedDf = Seq(
-        Row(Row(3, 0), Row(3, 3, false), "PUT", 1, 1),
-        Row(Row(4, 0), Row(4, 4, true), "PUT", 1, 2),
-        Row(Row(1, 0), Row(1, 1, false), "PUT", 0, 3),
-        Row(Row(2, 0), Row(2, 2, false), "PUT", 0, 4),
-        Row(Row(2, 0), Row(2, 2, true), "PUT", 0, 4)
+        Row(Row(3, 0L), Row(3, 3L, false), "PUT", 1L, 1),
+        Row(Row(4, 0L), Row(4, 4L, true), "PUT", 1L, 2),
+        Row(Row(1, 0L), Row(1, 1L, false), "PUT", 0L, 3),
+        Row(Row(2, 0L), Row(2, 2L, false), "PUT", 0L, 4),
+        Row(Row(2, 0L), Row(2, 2L, true), "PUT", 0L, 4)
       )
 
       checkAnswer(keyWithIndexToValueDf, keyWithIndexToValueExpectedDf)
@@ -259,15 +250,15 @@ abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBas
       val keyToNumValuesDf = spark.read.format("statestore")
         .option(StateSourceOptions.STORE_NAME, "left-keyToNumValues")
         .option(StateSourceOptions.MODE_TYPE, "cdc")
-        .option(StateSourceOptions.CDC_START_BATCH_ID, 0)
-        .option(StateSourceOptions.CDC_END_BATCH_ID, 1)
+        .option(StateSourceOptions.CHANGE_START_BATCH_ID, 0)
+        .option(StateSourceOptions.CHANGE_END_BATCH_ID, 1)
         .load(tempDir.getAbsolutePath)
 
       val keyToNumValuesDfExpectedDf = Seq(
-        Row(Row(3), Row(1), "PUT", 1, 1),
-        Row(Row(4), Row(1), "PUT", 1, 2),
-        Row(Row(1), Row(1), "PUT", 0, 3),
-        Row(Row(2), Row(1), "PUT", 0, 4)
+        Row(Row(3), Row(1L), "PUT", 1L, 1),
+        Row(Row(4), Row(1L), "PUT", 1L, 2),
+        Row(Row(1), Row(1L), "PUT", 0L, 3),
+        Row(Row(2), Row(1L), "PUT", 0L, 4)
       )
 
       checkAnswer(keyToNumValuesDf, keyToNumValuesDfExpectedDf)

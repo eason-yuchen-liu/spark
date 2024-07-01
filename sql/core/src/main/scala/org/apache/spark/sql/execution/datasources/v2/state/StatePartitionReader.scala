@@ -20,7 +20,6 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{GenericInternalRow, UnsafeRow}
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
-import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions.StateDataSourceModeType
 import org.apache.spark.sql.execution.datasources.v2.state.metadata.StateMetadataPartitionReader
 import org.apache.spark.sql.execution.datasources.v2.state.utils.SchemaUtil
 import org.apache.spark.sql.execution.streaming.state._
@@ -40,7 +39,7 @@ class StatePartitionReaderFactory(
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
     val stateStoreInputPartition = partition.asInstanceOf[StateStoreInputPartition]
-    if (stateStoreInputPartition.sourceOptions.modeType == StateDataSourceModeType.CDC) {
+    if (stateStoreInputPartition.sourceOptions.readChangeFeed) {
       new StateStoreChangeDataPartitionReader(storeConf, hadoopConf,
         stateStoreInputPartition, schema)
     } else {
@@ -164,8 +163,8 @@ class StateStoreChangeDataPartitionReader(
     }
     provider.asInstanceOf[SupportsFineGrainedReplay]
       .getStateStoreChangeDataReader(
-        partition.sourceOptions.cdcStartBatchID.get + 1,
-        partition.sourceOptions.cdcEndBatchId.get + 1)
+        partition.sourceOptions.changeStartBatchId.get + 1,
+        partition.sourceOptions.changeEndBatchId.get + 1)
   }
 
   override protected lazy val iter: Iterator[InternalRow] = {

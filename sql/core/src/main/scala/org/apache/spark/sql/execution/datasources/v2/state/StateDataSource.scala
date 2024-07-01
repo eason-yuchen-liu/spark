@@ -28,9 +28,8 @@ import org.apache.spark.sql.{RuntimeConfig, SparkSession}
 import org.apache.spark.sql.catalyst.DataSourceOptions
 import org.apache.spark.sql.connector.catalog.{Table, TableProvider}
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions.{JoinSideValues, StateDataSourceModeType}
+import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions.JoinSideValues
 import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions.JoinSideValues.JoinSideValues
-import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions.StateDataSourceModeType.ModeType
 import org.apache.spark.sql.execution.streaming.{CommitLog, OffsetSeqLog, OffsetSeqMetadata}
 import org.apache.spark.sql.execution.streaming.StreamingCheckpointConstants.{DIR_NAME_COMMITS, DIR_NAME_OFFSETS, DIR_NAME_STATE}
 import org.apache.spark.sql.execution.streaming.StreamingSymmetricHashJoinHelper.{LeftSide, RightSide}
@@ -81,11 +80,11 @@ class StateDataSource extends TableProvider with DataSourceRegister {
           manager.readSchemaFile()
       }
 
-      if (sourceOptions.modeType == StateDataSourceModeType.CDC) {
+      if (sourceOptions.readChangeFeed) {
         new StructType()
           .add("key", keySchema)
           .add("value", valueSchema)
-          .add("operation_type", StringType)
+          .add("change_type", StringType)
           .add("batch_id", LongType)
           .add("partition_id", IntegerType)
       } else {
@@ -130,10 +129,10 @@ case class StateSourceOptions(
     storeName: String,
     joinSide: JoinSideValues,
     snapshotStartBatchId: Option[Long],
-  snapshotPartitionId: Option[Int],
-  modeType: ModeType,
-  cdcStartBatchID: Option[Long],
-  cdcEndBatchId: Option[Long]) {
+    snapshotPartitionId: Option[Int],
+    readChangeFeed: Boolean,
+    changeStartBatchId: Option[Long],
+    changeEndBatchId: Option[Long]) {
   def stateCheckpointLocation: Path = new Path(resolvedCpLocation, DIR_NAME_STATE)
 
   override def toString: String = {
@@ -152,29 +151,13 @@ object StateSourceOptions extends DataSourceOptions {
   val JOIN_SIDE = newOption("joinSide")
   val SNAPSHOT_START_BATCH_ID = newOption("snapshotStartBatchId")
   val SNAPSHOT_PARTITION_ID = newOption("snapshotPartitionId")
-  val MODE_TYPE = newOption("modeType")
-  val CDC_START_BATCH_ID = newOption("cdcStartBatchId")
-  val CDC_END_BATCH_ID = newOption("cdcEndBatchId")
+  val READ_CHANGE_FEED = newOption("readChangeFeed")
+  val CHANGE_START_BATCH_ID = newOption("cdcStartBatchId")
+  val CHANGE_END_BATCH_ID = newOption("changeEndBatchId")
 
   object JoinSideValues extends Enumeration {
     type JoinSideValues = Value
     val left, right, none = Value
-  }
-
-  object StateDataSourceModeType extends Enumeration {
-    type ModeType = Value
-
-    val NORMAL = Value("normal")
-    val CDC = Value("cdc")
-
-    // Generate record type from byte representation
-    def getModeTypeFromString(mode: String): ModeType = {
-      mode match {
-        case "normal" => NORMAL
-        case "cdc" => CDC
-        case _ => throw new RuntimeException(s"Found invalid mode type for value=$mode")
-      }
-    }
   }
 
   def apply(
@@ -251,39 +234,34 @@ object StateSourceOptions extends DataSourceOptions {
       throw StateDataSourceErrors.requiredOptionUnspecified(SNAPSHOT_PARTITION_ID)
     }
 
-    val modeType = Option(options.get(MODE_TYPE)).map(
-      StateDataSourceModeType.getModeTypeFromString).getOrElse(StateDataSourceModeType.NORMAL)
+    val readChangeFeed = Option(options.get(READ_CHANGE_FEED)).exists(_.toBoolean)
 
-    var cdcStartBatchId = Option(options.get(CDC_START_BATCH_ID)).map(_.toLong)
-    var cdcEndBatchId = Option(options.get(CDC_END_BATCH_ID)).map(_.toLong)
+    val cdcStartBatchId = Option(options.get(CHANGE_START_BATCH_ID)).map(_.toLong)
+    var changeEndBatchId = Option(options.get(CHANGE_END_BATCH_ID)).map(_.toLong)
 
-    //    if (modeType == StateDataSourceModeType.NORMAL) {
-    //      if (cdcStartBatchId.isDefined) {
-    //        throw StateDataSourceErrors.conflictOptions(Seq(MODE_TYPE, CDC_START_BATCH_ID))
-    //      }
-    //      if (cdcEndBatchId.isDefined) {
-    //        throw StateDataSourceErrors.conflictOptions(Seq(MODE_TYPE, CDC_END_BATCH_ID))
-    //      }
-    //    } else {
-    //      cdcStartBatchId = Option(cdcStartBatchId.getOrElse(
-    //        getFirstCommittedBatch(sparkSession, resolvedCpLocation)))
-    //      cdcEndBatchId = Option(cdcEndBatchId.getOrElse(
-    //        getLastCommittedBatch(sparkSession, resolvedCpLocation)))
-    //
-    //      if (cdcStartBatchId.isDefined && cdcStartBatchId.get < 0) {
-    //        throw StateDataSourceErrors.invalidOptionValueIsNegative(CDC_START_BATCH_ID)
-    //      }
-    //      if (cdcEndBatchId.isDefined && (cdcEndBatchId.get < 0)) {
-    //        throw
-    //      }
-    //
-    //    }
-
+    if (readChangeFeed) {
+      if (joinSide != JoinSideValues.none) {
+        throw StateDataSourceErrors.conflictOptions(Seq(JOIN_SIDE, READ_CHANGE_FEED))
+      }
+      if (cdcStartBatchId.isEmpty) {
+        throw StateDataSourceErrors.requiredOptionUnspecified(CHANGE_START_BATCH_ID)
+      }
+      changeEndBatchId = Option(
+        changeEndBatchId.getOrElse(getLastCommittedBatch(sparkSession, resolvedCpLocation)))
+    } else {
+      if (cdcStartBatchId.isDefined) {
+        throw
+          StateDataSourceErrors.conflictOptions(Seq(READ_CHANGE_FEED, CHANGE_START_BATCH_ID))
+      }
+      if (changeEndBatchId.isDefined) {
+        throw StateDataSourceErrors.conflictOptions(Seq(READ_CHANGE_FEED, CHANGE_END_BATCH_ID))
+      }
+    }
 
     StateSourceOptions(
       resolvedCpLocation, batchId, operatorId, storeName,
       joinSide, snapshotStartBatchId, snapshotPartitionId,
-      modeType, cdcStartBatchId, cdcEndBatchId)
+      readChangeFeed, cdcStartBatchId, changeEndBatchId)
   }
 
   private def resolvedCheckpointLocation(

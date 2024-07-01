@@ -27,13 +27,13 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.streaming.OutputMode
 import org.apache.spark.sql.types.StructType
 
-class HDFSBackedStateDataSourceReadChangeDataSuite extends StateDataSourceChangeDataReadSuite {
+class HDFSBackedStateDataSourceChangeDataReaderSuite extends StateDataSourceChangeDataReaderSuite {
   override protected def newStateStoreProvider(): HDFSBackedStateStoreProvider =
     new HDFSBackedStateStoreProvider
 }
 
 class RocksDBWithChangelogCheckpointStateDataSourceChangeDataReaderSuite extends
-StateDataSourceChangeDataReadSuite {
+  StateDataSourceChangeDataReaderSuite {
   override protected def newStateStoreProvider(): RocksDBStateStoreProvider =
     new RocksDBStateStoreProvider
 
@@ -44,7 +44,8 @@ StateDataSourceChangeDataReadSuite {
   }
 }
 
-abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBase with Assertions {
+abstract class StateDataSourceChangeDataReaderSuite extends StateDataSourceTestBase
+  with Assertions {
 
   import testImplicits._
   import StateStoreTestsHelper._

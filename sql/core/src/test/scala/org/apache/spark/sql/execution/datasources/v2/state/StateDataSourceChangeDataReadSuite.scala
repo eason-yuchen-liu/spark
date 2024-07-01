@@ -27,12 +27,12 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.streaming.OutputMode
 import org.apache.spark.sql.types.StructType
 
-class HDFSBackedStateDataSourceReadCDCSuite extends StateDataSourceChangeDataReadSuite {
+class HDFSBackedStateDataSourceReadChangeDataSuite extends StateDataSourceChangeDataReadSuite {
   override protected def newStateStoreProvider(): HDFSBackedStateStoreProvider =
     new HDFSBackedStateStoreProvider
 }
 
-class RocksDBWithChangelogCheckpointStateDataSourceCDCReaderSuite extends
+class RocksDBWithChangelogCheckpointStateDataSourceChangeDataReaderSuite extends
 StateDataSourceChangeDataReadSuite {
   override protected def newStateStoreProvider(): RocksDBStateStoreProvider =
     new RocksDBStateStoreProvider
@@ -126,7 +126,7 @@ abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBas
       )
 
       val stateDf = spark.read.format("statestore")
-        .option(StateSourceOptions.MODE_TYPE, "cdc")
+        .option(StateSourceOptions.READ_CHANGE_FEED, value = true)
         .option(StateSourceOptions.CHANGE_START_BATCH_ID, 0)
         .option(StateSourceOptions.CHANGE_END_BATCH_ID, 2)
         .load(tempDir.getAbsolutePath)
@@ -156,7 +156,7 @@ abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBas
       )
 
       val stateDf = spark.read.format("statestore")
-        .option(StateSourceOptions.MODE_TYPE, "cdc")
+        .option(StateSourceOptions.READ_CHANGE_FEED, value = true)
         .option(StateSourceOptions.CHANGE_START_BATCH_ID, 0)
         .option(StateSourceOptions.CHANGE_END_BATCH_ID, 2)
         .load(tempDir.getAbsolutePath)
@@ -195,7 +195,7 @@ abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBas
       )
 
       val stateDf = spark.read.format("statestore")
-        .option(StateSourceOptions.MODE_TYPE, "cdc")
+        .option(StateSourceOptions.READ_CHANGE_FEED, value = true)
         .option(StateSourceOptions.CHANGE_START_BATCH_ID, 0)
         .option(StateSourceOptions.CHANGE_END_BATCH_ID, 2)
         .load(tempDir.getAbsolutePath)
@@ -232,7 +232,7 @@ abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBas
 
       val keyWithIndexToValueDf = spark.read.format("statestore")
         .option(StateSourceOptions.STORE_NAME, "left-keyWithIndexToValue")
-        .option(StateSourceOptions.MODE_TYPE, "cdc")
+        .option(StateSourceOptions.READ_CHANGE_FEED, value = true)
         .option(StateSourceOptions.CHANGE_START_BATCH_ID, 0)
         .option(StateSourceOptions.CHANGE_END_BATCH_ID, 1)
         .load(tempDir.getAbsolutePath)
@@ -249,7 +249,7 @@ abstract class StateDataSourceChangeDataReadSuite extends StateDataSourceTestBas
 
       val keyToNumValuesDf = spark.read.format("statestore")
         .option(StateSourceOptions.STORE_NAME, "left-keyToNumValues")
-        .option(StateSourceOptions.MODE_TYPE, "cdc")
+        .option(StateSourceOptions.READ_CHANGE_FEED, value = true)
         .option(StateSourceOptions.CHANGE_START_BATCH_ID, 0)
         .option(StateSourceOptions.CHANGE_END_BATCH_ID, 1)
         .load(tempDir.getAbsolutePath)

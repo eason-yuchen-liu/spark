@@ -152,7 +152,7 @@ object StateSourceOptions extends DataSourceOptions {
   val SNAPSHOT_START_BATCH_ID = newOption("snapshotStartBatchId")
   val SNAPSHOT_PARTITION_ID = newOption("snapshotPartitionId")
   val READ_CHANGE_FEED = newOption("readChangeFeed")
-  val CHANGE_START_BATCH_ID = newOption("cdcStartBatchId")
+  val CHANGE_START_BATCH_ID = newOption("changeStartBatchId")
   val CHANGE_END_BATCH_ID = newOption("changeEndBatchId")
 
   object JoinSideValues extends Enumeration {
@@ -236,20 +236,20 @@ object StateSourceOptions extends DataSourceOptions {
 
     val readChangeFeed = Option(options.get(READ_CHANGE_FEED)).exists(_.toBoolean)
 
-    val cdcStartBatchId = Option(options.get(CHANGE_START_BATCH_ID)).map(_.toLong)
+    val changeStartBatchId = Option(options.get(CHANGE_START_BATCH_ID)).map(_.toLong)
     var changeEndBatchId = Option(options.get(CHANGE_END_BATCH_ID)).map(_.toLong)
 
     if (readChangeFeed) {
       if (joinSide != JoinSideValues.none) {
         throw StateDataSourceErrors.conflictOptions(Seq(JOIN_SIDE, READ_CHANGE_FEED))
       }
-      if (cdcStartBatchId.isEmpty) {
+      if (changeStartBatchId.isEmpty) {
         throw StateDataSourceErrors.requiredOptionUnspecified(CHANGE_START_BATCH_ID)
       }
       changeEndBatchId = Option(
         changeEndBatchId.getOrElse(getLastCommittedBatch(sparkSession, resolvedCpLocation)))
     } else {
-      if (cdcStartBatchId.isDefined) {
+      if (changeStartBatchId.isDefined) {
         throw
           StateDataSourceErrors.conflictOptions(Seq(READ_CHANGE_FEED, CHANGE_START_BATCH_ID))
       }
@@ -261,7 +261,7 @@ object StateSourceOptions extends DataSourceOptions {
     StateSourceOptions(
       resolvedCpLocation, batchId, operatorId, storeName,
       joinSide, snapshotStartBatchId, snapshotPartitionId,
-      readChangeFeed, cdcStartBatchId, changeEndBatchId)
+      readChangeFeed, changeStartBatchId, changeEndBatchId)
   }
 
   private def resolvedCheckpointLocation(

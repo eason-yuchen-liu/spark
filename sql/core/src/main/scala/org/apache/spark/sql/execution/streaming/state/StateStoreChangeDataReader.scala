@@ -108,7 +108,7 @@ abstract class StateStoreChangeDataReader(
   }
 }
 
-class HDFSBackedStateStoreCDCReader(
+class HDFSBackedStateStoreChangeDataReader(
     fm: CheckpointFileManager,
     stateLocation: Path,
     startVersion: Long,
@@ -143,7 +143,7 @@ class HDFSBackedStateStoreCDCReader(
   }
 }
 
-class RocksDBStateStoreCDCReader(
+class RocksDBStateStoreChangeDataReader(
     fm: CheckpointFileManager,
     stateLocation: Path,
     startVersion: Long,

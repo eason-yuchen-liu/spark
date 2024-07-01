@@ -156,7 +156,7 @@ class StateStoreChangeDataPartitionReader(
   partition: StateStoreInputPartition,
   schema: StructType) extends StatePartitionReader(storeConf, hadoopConf, partition, schema) {
 
-  private lazy val cdcReader: StateStoreChangeDataReader = {
+  private lazy val changeDataReader: StateStoreChangeDataReader = {
     if (!provider.isInstanceOf[SupportsFineGrainedReplay]) {
       throw StateStoreErrors.stateStoreProviderDoesNotSupportFineGrainedReplay(
         provider.getClass.toString)
@@ -168,16 +168,16 @@ class StateStoreChangeDataPartitionReader(
   }
 
   override protected lazy val iter: Iterator[InternalRow] = {
-    cdcReader.iterator.map(unifyStateCDCRow)
+    changeDataReader.iterator.map(unifyStateChangeDataRow)
   }
 
   override def close(): Unit = {
     current = null
-    cdcReader.close()
+    changeDataReader.close()
     provider.close()
   }
 
-  private def unifyStateCDCRow(row: (RecordType, UnsafeRow, UnsafeRow, Long)): InternalRow = {
+  private def unifyStateChangeDataRow(row: (RecordType, UnsafeRow, UnsafeRow, Long)): InternalRow = {
     val result = new GenericInternalRow(5)
     result.update(0, row._2)
     result.update(1, row._3)

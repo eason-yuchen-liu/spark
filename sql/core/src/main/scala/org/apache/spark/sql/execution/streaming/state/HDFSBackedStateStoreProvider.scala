@@ -981,7 +981,7 @@ private[sql] class HDFSBackedStateStoreProvider extends StateStoreProvider with 
 
   override def getStateStoreChangeDataReader(startVersion: Long, endVersion: Long):
     StateStoreChangeDataReader = {
-    new HDFSBackedStateStoreCDCReader(fm, baseDir, startVersion, endVersion,
+    new HDFSBackedStateStoreChangeDataReader(fm, baseDir, startVersion, endVersion,
       CompressionCodec.createCodec(sparkConf, storeConf.compressionCodec),
       keySchema, valueSchema)
   }

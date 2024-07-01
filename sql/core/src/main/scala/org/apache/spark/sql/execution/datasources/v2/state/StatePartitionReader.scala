@@ -177,7 +177,8 @@ class StateStoreChangeDataPartitionReader(
     provider.close()
   }
 
-  private def unifyStateChangeDataRow(row: (RecordType, UnsafeRow, UnsafeRow, Long)): InternalRow = {
+  private def unifyStateChangeDataRow(row: (RecordType, UnsafeRow, UnsafeRow, Long)):
+    InternalRow = {
     val result = new GenericInternalRow(5)
     result.update(0, row._2)
     result.update(1, row._3)

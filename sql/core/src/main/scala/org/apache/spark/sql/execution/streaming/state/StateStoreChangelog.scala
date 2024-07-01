@@ -57,9 +57,10 @@ object RecordType extends Enumeration {
 
   def getRecordTypeAsString(recordType: RecordType): String = {
     recordType match {
-      case PUT_RECORD => "PUT"
-      case DELETE_RECORD => "DELETE"
-      case _ => "UNDEFINED"
+      case PUT_RECORD => "update"
+      case DELETE_RECORD => "delete"
+      case _ => throw StateStoreErrors.unsupportedOperationException(
+        "getRecordTypeAsString", recordType.toString)
     }
   }
 

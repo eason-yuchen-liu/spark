@@ -186,7 +186,7 @@ class StateStoreChangelogWriterV1(
     } catch {
       case e: Throwable =>
         abort()
-        logError(s"Fail to commit changelog file $file because of exception $e")
+        logError(log"Fail to commit changelog file ${MDC(PATH, file)} because of exception", e)
         throw e
     } finally {
       backingFileStream = null
@@ -265,7 +265,7 @@ class StateStoreChangelogWriterV2(
     } catch {
       case e: Throwable =>
         abort()
-        logError(s"Fail to commit changelog file $file because of exception $e")
+        logError(log"Fail to commit changelog file ${MDC(PATH, file)} because of exception", e)
         throw e
     } finally {
       backingFileStream = null

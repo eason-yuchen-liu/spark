@@ -42,10 +42,10 @@ class StatePartitionReaderFactory(
     val stateStoreInputPartition = partition.asInstanceOf[StateStoreInputPartition]
     if (stateStoreInputPartition.sourceOptions.readChangeFeed) {
       new StateStoreChangeDataPartitionReader(storeConf, hadoopConf,
-        stateStoreInputPartition, schema)
+        partition.asInstanceOf[StateStoreInputPartition], schema, stateStoreMetadata)
     } else {
       new StatePartitionReader(storeConf, hadoopConf,
-        stateStoreInputPartition, schema)
+        partition.asInstanceOf[StateStoreInputPartition], schema, stateStoreMetadata)
     }
   }
 }
@@ -146,10 +146,12 @@ class StatePartitionReader(
 }
 
 class StateStoreChangeDataPartitionReader(
-  storeConf: StateStoreConf,
-  hadoopConf: SerializableConfiguration,
-  partition: StateStoreInputPartition,
-  schema: StructType) extends StatePartitionReader(storeConf, hadoopConf, partition, schema) {
+    storeConf: StateStoreConf,
+    hadoopConf: SerializableConfiguration,
+    partition: StateStoreInputPartition,
+    schema: StructType,
+    stateStoreMetadata: Array[StateMetadataTableEntry])
+  extends StatePartitionReader(storeConf, hadoopConf, partition, schema, stateStoreMetadata) {
 
   private lazy val changeDataReader: StateStoreChangeDataReader = {
     if (!provider.isInstanceOf[SupportsFineGrainedReplay]) {

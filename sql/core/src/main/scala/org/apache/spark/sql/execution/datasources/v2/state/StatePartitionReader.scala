@@ -23,7 +23,9 @@ import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, Par
 import org.apache.spark.sql.execution.datasources.v2.state.metadata.StateMetadataTableEntry
 import org.apache.spark.sql.execution.datasources.v2.state.utils.SchemaUtil
 import org.apache.spark.sql.execution.streaming.state._
+import org.apache.spark.sql.execution.streaming.state.RecordType.{getRecordTypeAsString, RecordType}
 import org.apache.spark.sql.types.StructType
+import org.apache.spark.unsafe.types.UTF8String
 import org.apache.spark.util.SerializableConfiguration
 
 /**
@@ -37,8 +39,14 @@ class StatePartitionReaderFactory(
     stateStoreMetadata: Array[StateMetadataTableEntry]) extends PartitionReaderFactory {
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
-    new StatePartitionReader(storeConf, hadoopConf,
-      partition.asInstanceOf[StateStoreInputPartition], schema, stateStoreMetadata)
+    val stateStoreInputPartition = partition.asInstanceOf[StateStoreInputPartition]
+    if (stateStoreInputPartition.sourceOptions.readChangeFeed) {
+      new StateStoreChangeDataPartitionReader(storeConf, hadoopConf,
+        stateStoreInputPartition, schema)
+    } else {
+      new StatePartitionReader(storeConf, hadoopConf,
+        stateStoreInputPartition, schema)
+    }
   }
 }
 
@@ -57,7 +65,7 @@ class StatePartitionReader(
   private val keySchema = SchemaUtil.getSchemaAsDataType(schema, "key").asInstanceOf[StructType]
   private val valueSchema = SchemaUtil.getSchemaAsDataType(schema, "value").asInstanceOf[StructType]
 
-  private lazy val provider: StateStoreProvider = {
+  protected lazy val provider: StateStoreProvider = {
     val stateStoreId = StateStoreId(partition.sourceOptions.stateCheckpointLocation.toString,
       partition.sourceOptions.operatorId, partition.partition, partition.sourceOptions.storeName)
     val stateStoreProviderId = StateStoreProviderId(stateStoreId, partition.queryId)
@@ -104,11 +112,11 @@ class StatePartitionReader(
     }
   }
 
-  private lazy val iter: Iterator[InternalRow] = {
+  protected lazy val iter: Iterator[InternalRow] = {
     store.iterator().map(pair => unifyStateRowPair((pair.key, pair.value)))
   }
 
-  private var current: InternalRow = _
+  protected var current: InternalRow = _
 
   override def next(): Boolean = {
     if (iter.hasNext) {
@@ -134,5 +142,44 @@ class StatePartitionReader(
     row.update(1, pair._2)
     row.update(2, partition.partition)
     row
+  }
+}
+
+class StateStoreChangeDataPartitionReader(
+  storeConf: StateStoreConf,
+  hadoopConf: SerializableConfiguration,
+  partition: StateStoreInputPartition,
+  schema: StructType) extends StatePartitionReader(storeConf, hadoopConf, partition, schema) {
+
+  private lazy val changeDataReader: StateStoreChangeDataReader = {
+    if (!provider.isInstanceOf[SupportsFineGrainedReplay]) {
+      throw StateStoreErrors.stateStoreProviderDoesNotSupportFineGrainedReplay(
+        provider.getClass.toString)
+    }
+    provider.asInstanceOf[SupportsFineGrainedReplay]
+      .getStateStoreChangeDataReader(
+        partition.sourceOptions.changeStartBatchId.get + 1,
+        partition.sourceOptions.changeEndBatchId.get + 1)
+  }
+
+  override protected lazy val iter: Iterator[InternalRow] = {
+    changeDataReader.iterator.map(unifyStateChangeDataRow)
+  }
+
+  override def close(): Unit = {
+    current = null
+    changeDataReader.close()
+    provider.close()
+  }
+
+  private def unifyStateChangeDataRow(row: (RecordType, UnsafeRow, UnsafeRow, Long)):
+    InternalRow = {
+    val result = new GenericInternalRow(5)
+    result.update(0, row._2)
+    result.update(1, row._3)
+    result.update(2, UTF8String.fromString(getRecordTypeAsString(row._1)))
+    result.update(3, row._4)
+    result.update(4, partition.partition)
+    result
   }
 }

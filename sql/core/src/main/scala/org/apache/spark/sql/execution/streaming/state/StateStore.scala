@@ -445,6 +445,7 @@ object StateStoreProvider {
  * snapshotStartBatchId or readChangeFeed.
  */
 trait SupportsFineGrainedReplay {
+
   /**
    * Return an instance of [[StateStore]] representing state data of the given version.
    * The State Store will be constructed from the snapshot at snapshotVersion, and applying delta

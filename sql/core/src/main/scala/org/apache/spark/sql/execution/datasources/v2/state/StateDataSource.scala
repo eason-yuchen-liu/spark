@@ -246,15 +246,26 @@ object StateSourceOptions extends DataSourceOptions {
       if (changeStartBatchId.isEmpty) {
         throw StateDataSourceErrors.requiredOptionUnspecified(CHANGE_START_BATCH_ID)
       }
-      changeEndBatchId = Option(
-        changeEndBatchId.getOrElse(getLastCommittedBatch(sparkSession, resolvedCpLocation)))
+      changeEndBatchId = Option(changeEndBatchId.getOrElse(batchId))
+
+      // changeStartBatchId and changeEndBatchId must all be defined at this point
+      if (changeStartBatchId.get < 0) {
+        throw StateDataSourceErrors.invalidOptionValueIsNegative(CHANGE_START_BATCH_ID)
+      }
+      if (changeEndBatchId.get < changeStartBatchId.get) {
+        throw StateDataSourceErrors.invalidOptionValue(CHANGE_END_BATCH_ID,
+          s"$CHANGE_END_BATCH_ID cannot be smaller than $CHANGE_START_BATCH_ID. " +
+          s"Please check the input to $CHANGE_END_BATCH_ID, or if you are using its default " +
+          s"value, make sure that $CHANGE_START_BATCH_ID is less than ${changeEndBatchId.get}.")
+      }
     } else {
       if (changeStartBatchId.isDefined) {
-        throw
-          StateDataSourceErrors.conflictOptions(Seq(READ_CHANGE_FEED, CHANGE_START_BATCH_ID))
+        throw StateDataSourceErrors.invalidOptionValue(CHANGE_START_BATCH_ID,
+            s"Only specify this option when $READ_CHANGE_FEED is set to true.")
       }
       if (changeEndBatchId.isDefined) {
-        throw StateDataSourceErrors.conflictOptions(Seq(READ_CHANGE_FEED, CHANGE_END_BATCH_ID))
+        throw StateDataSourceErrors.invalidOptionValue(CHANGE_END_BATCH_ID,
+          s"Only specify this option when $READ_CHANGE_FEED is set to true.")
       }
     }
 

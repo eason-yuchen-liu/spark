@@ -81,6 +81,62 @@ abstract class StateDataSourceChangeDataReaderSuite extends StateDataSourceTestB
     provider
   }
 
+  test("ERROR: specify changeStartBatchId in normal mode") {
+    withTempDir { tempDir =>
+      val exc = intercept[StateDataSourceInvalidOptionValue] {
+        spark.read.format("statestore")
+          .option(StateSourceOptions.BATCH_ID, 0)
+          .option(StateSourceOptions.CHANGE_START_BATCH_ID, 0)
+          .option(StateSourceOptions.CHANGE_END_BATCH_ID, 2)
+          .load(tempDir.getAbsolutePath)
+      }
+      assert(exc.getErrorClass === "STDS_INVALID_OPTION_VALUE.WITH_MESSAGE")
+    }
+  }
+
+  test("ERROR: changeStartBatchId is set to negative") {
+    withTempDir { tempDir =>
+      val exc = intercept[StateDataSourceInvalidOptionValueIsNegative] {
+        spark.read.format("statestore")
+          .option(StateSourceOptions.BATCH_ID, 0)
+          .option(StateSourceOptions.READ_CHANGE_FEED, value = true)
+          .option(StateSourceOptions.CHANGE_START_BATCH_ID, -1)
+          .option(StateSourceOptions.CHANGE_END_BATCH_ID, 0)
+          .load(tempDir.getAbsolutePath)
+      }
+      assert(exc.getErrorClass === "STDS_INVALID_OPTION_VALUE.IS_NEGATIVE")
+    }
+  }
+
+  test("ERROR: changeEndBatchId is set to less than changeStartBatchId") {
+    withTempDir { tempDir =>
+      val exc = intercept[StateDataSourceInvalidOptionValue] {
+        spark.read.format("statestore")
+          .option(StateSourceOptions.BATCH_ID, 0)
+          .option(StateSourceOptions.READ_CHANGE_FEED, value = true)
+          .option(StateSourceOptions.CHANGE_START_BATCH_ID, 1)
+          .option(StateSourceOptions.CHANGE_END_BATCH_ID, 0)
+          .load(tempDir.getAbsolutePath)
+      }
+      assert(exc.getErrorClass === "STDS_INVALID_OPTION_VALUE.WITH_MESSAGE")
+    }
+  }
+
+  test("ERROR: joinSide option is used together with readChangeFeed") {
+    withTempDir { tempDir =>
+      val exc = intercept[StateDataSourceConflictOptions] {
+        spark.read.format("statestore")
+          .option(StateSourceOptions.BATCH_ID, 0)
+          .option(StateSourceOptions.READ_CHANGE_FEED, value = true)
+          .option(StateSourceOptions.JOIN_SIDE, "left")
+          .option(StateSourceOptions.CHANGE_START_BATCH_ID, 0)
+          .option(StateSourceOptions.CHANGE_END_BATCH_ID, 0)
+          .load(tempDir.getAbsolutePath)
+      }
+      assert(exc.getErrorClass === "STDS_CONFLICT_OPTIONS")
+    }
+  }
+
   test("getChangeDataReader of state store provider") {
     def withNewStateStore(provider: StateStoreProvider, version: Int)(f: StateStore => Unit):
       Unit = {
